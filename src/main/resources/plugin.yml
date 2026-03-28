@@ -11,10 +11,28 @@ commands:
   hunter:
     description: Select the hunter role.
     usage: /hunter
+  spectate:
+    description: Toggle spectator mode.
+    usage: /spectate
   ready:
     description: Mark yourself as ready.
     usage: /ready
   unready:
     description: Remove your ready status.
     usage: /unready
-
+  hunterkeepinventory:
+    description: Change whether hunters keep inventory and XP on death.
+    usage: /hunterkeepinventory <on|off|toggle|status>
+    permission: huntcore.admin
+  setlobby:
+    description: Set the waiting lobby to your current location.
+    usage: /setlobby
+    permission: huntcore.admin
+  installlobbymap:
+    description: Import a world zip and use it as the waiting lobby.
+    usage: /installlobbymap [zip-path] [world-name]
+    permission: huntcore.admin
+permissions:
+  huntcore.admin:
+    description: Allows changing HuntCore match settings in game.
+    default: op

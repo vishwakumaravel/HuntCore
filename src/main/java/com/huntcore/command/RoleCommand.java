@@ -27,6 +27,11 @@ public final class RoleCommand implements CommandExecutor {
             return true;
         }
 
+        if (gameManager.isRoleSelectionLocked(player)) {
+            player.sendMessage("[HuntCore] You are already part of the active round.");
+            return true;
+        }
+
         if (!gameManager.isLobbyEditable()) {
             player.sendMessage("[HuntCore] Role selection is only available in the lobby.");
             return true;
@@ -45,8 +50,8 @@ public final class RoleCommand implements CommandExecutor {
         playerRegistry.registerPlayer(player);
         playerRegistry.setRole(player.getUniqueId(), role);
         player.sendMessage("[HuntCore] Role set to " + role.name().toLowerCase() + ". Use /ready when you are set.");
+        player.sendMessage("[HuntCore] " + gameManager.getLobbyStatusSummary());
         gameManager.handleLobbyStateChange();
         return true;
     }
 }
-

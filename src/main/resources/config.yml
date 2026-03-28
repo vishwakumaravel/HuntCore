@@ -1,8 +1,14 @@
 # HuntCore default configuration.
+# Each match creates a fresh temporary overworld, Nether, and End.
+# The world prefix below controls the folder names used for those temporary worlds.
+# Match participants get their dragon-kill advancement reset at round start.
+# Disconnect grace controls how long players have to rejoin before the other team wins.
 
 lobby:
   world: world
   use-world-spawn: true
+  map-zip-path: ""
+  map-world-name: huntcore_parkour_lobby
   x: 0.5
   y: 64.0
   z: 0.5
@@ -14,13 +20,16 @@ countdowns:
   hunter-head-start-seconds: 20
 
 match:
-  world: world
+  world-prefix: huntcore_match
   spawn-radius: 2000
   spawn-attempts: 40
   structure-search-radius-chunks: 80
+  disconnect-grace-seconds: 60
+  hunters-keep-inventory: false
 
 tracking:
   compass-update-ticks: 20
+  portal-memory-seconds: 180
 
 end-of-match:
   return-to-lobby-seconds: 5

@@ -34,8 +34,29 @@ public final class PluginConfig {
         return plugin.getConfig().getInt("match.structure-search-radius-chunks", 80);
     }
 
+    public String getMatchWorldPrefix() {
+        return plugin.getConfig().getString("match.world-prefix", "huntcore_match");
+    }
+
+    public int getDisconnectGraceSeconds() {
+        return plugin.getConfig().getInt("match.disconnect-grace-seconds", 60);
+    }
+
+    public boolean shouldHuntersKeepInventory() {
+        return plugin.getConfig().getBoolean("match.hunters-keep-inventory", false);
+    }
+
+    public void setHuntersKeepInventory(boolean keepInventory) {
+        plugin.getConfig().set("match.hunters-keep-inventory", keepInventory);
+        plugin.saveConfig();
+    }
+
     public int getCompassUpdateTicks() {
         return plugin.getConfig().getInt("tracking.compass-update-ticks", 20);
+    }
+
+    public int getTrackingPortalMemorySeconds() {
+        return plugin.getConfig().getInt("tracking.portal-memory-seconds", 180);
     }
 
     public int getReturnToLobbySeconds() {
@@ -67,19 +88,36 @@ public final class PluginConfig {
         );
     }
 
-    public World getMatchWorld(Server server) {
-        World configured = server.getWorld(plugin.getConfig().getString("match.world", "world"));
-        if (configured != null && configured.getEnvironment() == World.Environment.NORMAL) {
-            return configured;
+    public String getLobbyMapZipPath() {
+        return plugin.getConfig().getString("lobby.map-zip-path", "").trim();
+    }
+
+    public String getLobbyMapWorldName() {
+        return plugin.getConfig().getString("lobby.map-world-name", "huntcore_parkour_lobby");
+    }
+
+    public void setLobbySpawn(Location location) {
+        if (location == null || location.getWorld() == null) {
+            throw new IllegalArgumentException("Lobby spawn location must include a world.");
         }
 
-        for (World world : server.getWorlds()) {
-            if (world.getEnvironment() == World.Environment.NORMAL) {
-                return world;
-            }
+        FileConfiguration config = plugin.getConfig();
+        config.set("lobby.world", location.getWorld().getName());
+        config.set("lobby.use-world-spawn", false);
+        config.set("lobby.x", location.getX());
+        config.set("lobby.y", location.getY());
+        config.set("lobby.z", location.getZ());
+        config.set("lobby.yaw", location.getYaw());
+        config.set("lobby.pitch", location.getPitch());
+        plugin.saveConfig();
+    }
+
+    public void setLobbyToWorldSpawn(World world) {
+        if (world == null) {
+            throw new IllegalArgumentException("Lobby world must not be null.");
         }
 
-        return getFallbackWorld(server);
+        setLobbySpawn(world.getSpawnLocation().clone().add(0.5, 0.0, 0.5));
     }
 
     private World getFallbackWorld(Server server) {
@@ -90,4 +128,3 @@ public final class PluginConfig {
         return server.getWorlds().get(0);
     }
 }
-

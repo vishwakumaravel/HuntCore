@@ -33,20 +33,26 @@ public final class ReadyCommand implements CommandExecutor {
         }
 
         playerRegistry.registerPlayer(player);
-        if (readyValue && playerRegistry.getRole(player.getUniqueId()) == PlayerRole.NONE) {
+        PlayerRole role = playerRegistry.getRole(player.getUniqueId());
+        if (role == PlayerRole.SPECTATOR) {
+            player.sendMessage("[HuntCore] Spectators do not need /ready. Use /spectate again if you want to rejoin the queue.");
+            return true;
+        }
+
+        if (readyValue && role == PlayerRole.NONE) {
             player.sendMessage("[HuntCore] Pick /runner or /hunter before using /ready.");
             return true;
         }
 
         if (playerRegistry.isReady(player.getUniqueId()) == readyValue) {
-            player.sendMessage("[HuntCore] Your ready state is already " + readyValue + ".");
+            player.sendMessage("[HuntCore] You are already marked as " + (readyValue ? "ready." : "not ready."));
             return true;
         }
 
         playerRegistry.setReady(player.getUniqueId(), readyValue);
-        player.sendMessage("[HuntCore] Ready state updated: " + readyValue);
+        player.sendMessage("[HuntCore] You are now " + (readyValue ? "ready." : "not ready."));
+        player.sendMessage("[HuntCore] " + gameManager.getLobbyStatusSummary());
         gameManager.handleLobbyStateChange();
         return true;
     }
 }
-

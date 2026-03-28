@@ -50,18 +50,37 @@ public final class PlayerRegistry {
             .toList();
     }
 
-    public boolean areAllOnlinePlayersReadyAndAssigned(Collection<? extends Player> onlinePlayers) {
-        if (onlinePlayers.isEmpty()) {
-            return false;
-        }
+    public boolean areAllQueuedPlayersReadyAndAssigned(Collection<? extends Player> onlinePlayers) {
+        boolean hasQueuedPlayers = false;
 
         for (Player player : onlinePlayers) {
-            if (getRole(player.getUniqueId()) == PlayerRole.NONE || !isReady(player.getUniqueId())) {
+            PlayerRole role = getRole(player.getUniqueId());
+            if (role != PlayerRole.RUNNER && role != PlayerRole.HUNTER) {
+                continue;
+            }
+
+            hasQueuedPlayers = true;
+            if (!isReady(player.getUniqueId())) {
                 return false;
             }
         }
 
-        return true;
+        return hasQueuedPlayers;
+    }
+
+    public int countOnlinePlayersWithAnyRole(Collection<? extends Player> onlinePlayers, PlayerRole... roles) {
+        int count = 0;
+        for (Player player : onlinePlayers) {
+            PlayerRole playerRole = getRole(player.getUniqueId());
+            for (PlayerRole role : roles) {
+                if (playerRole == role) {
+                    count++;
+                    break;
+                }
+            }
+        }
+
+        return count;
     }
 
     private PlayerSelection getSelection(UUID playerId) {

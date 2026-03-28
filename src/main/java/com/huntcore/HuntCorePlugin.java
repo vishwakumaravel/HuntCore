@@ -1,7 +1,11 @@
 package com.huntcore;
 
+import com.huntcore.command.HunterKeepInventoryCommand;
+import com.huntcore.command.InstallLobbyMapCommand;
 import com.huntcore.command.ReadyCommand;
 import com.huntcore.command.RoleCommand;
+import com.huntcore.command.SetLobbyCommand;
+import com.huntcore.command.SpectateCommand;
 import com.huntcore.config.PluginConfig;
 import com.huntcore.game.GameManager;
 import com.huntcore.game.LobbyService;
@@ -10,9 +14,13 @@ import com.huntcore.game.PlayerRegistry;
 import com.huntcore.game.PlayerRole;
 import com.huntcore.listener.HunterCompassListener;
 import com.huntcore.listener.MatchEventListener;
+import com.huntcore.listener.MatchPortalListener;
 import com.huntcore.listener.PlayerConnectionListener;
 import com.huntcore.tracking.CompassTracker;
+import com.huntcore.tracking.PortalTrackingService;
+import com.huntcore.world.LobbyMapInstaller;
 import com.huntcore.world.MatchSpawnService;
+import com.huntcore.world.MatchWorldService;
 import com.huntcore.world.StructureHintService;
 import org.bukkit.Bukkit;
 import org.bukkit.command.CommandExecutor;
@@ -26,10 +34,13 @@ public final class HuntCorePlugin extends JavaPlugin {
     private PlayerRegistry playerRegistry;
     private LobbyService lobbyService;
     private MatchSpawnService matchSpawnService;
+    private MatchWorldService matchWorldService;
     private StructureHintService structureHintService;
     private MatchCountdown matchCountdown;
+    private PortalTrackingService portalTrackingService;
     private CompassTracker compassTracker;
     private GameManager gameManager;
+    private LobbyMapInstaller lobbyMapInstaller;
 
     @Override
     public void onEnable() {
@@ -39,15 +50,19 @@ public final class HuntCorePlugin extends JavaPlugin {
         this.playerRegistry = new PlayerRegistry();
         this.lobbyService = new LobbyService(pluginConfig);
         this.matchSpawnService = new MatchSpawnService(pluginConfig);
+        this.matchWorldService = new MatchWorldService(this, pluginConfig);
         this.structureHintService = new StructureHintService(pluginConfig);
         this.matchCountdown = new MatchCountdown(this);
-        this.compassTracker = new CompassTracker(this, pluginConfig);
+        this.portalTrackingService = new PortalTrackingService();
+        this.compassTracker = new CompassTracker(this, pluginConfig, portalTrackingService);
+        this.lobbyMapInstaller = new LobbyMapInstaller(this, pluginConfig);
         this.gameManager = new GameManager(
             this,
             pluginConfig,
             playerRegistry,
             lobbyService,
             matchSpawnService,
+            matchWorldService,
             structureHintService,
             matchCountdown,
             compassTracker
@@ -73,8 +88,12 @@ public final class HuntCorePlugin extends JavaPlugin {
     private void registerCommands() {
         registerCommand("runner", new RoleCommand(playerRegistry, gameManager, PlayerRole.RUNNER));
         registerCommand("hunter", new RoleCommand(playerRegistry, gameManager, PlayerRole.HUNTER));
+        registerCommand("spectate", new SpectateCommand(gameManager));
         registerCommand("ready", new ReadyCommand(playerRegistry, gameManager, true));
         registerCommand("unready", new ReadyCommand(playerRegistry, gameManager, false));
+        registerCommand("hunterkeepinventory", new HunterKeepInventoryCommand(pluginConfig));
+        registerCommand("setlobby", new SetLobbyCommand(pluginConfig));
+        registerCommand("installlobbymap", new InstallLobbyMapCommand(lobbyMapInstaller));
     }
 
     private void registerListeners() {
@@ -83,7 +102,11 @@ public final class HuntCorePlugin extends JavaPlugin {
             this
         );
         Bukkit.getPluginManager().registerEvents(
-            new MatchEventListener(this, lobbyService, gameManager),
+            new MatchEventListener(this, gameManager),
+            this
+        );
+        Bukkit.getPluginManager().registerEvents(
+            new MatchPortalListener(gameManager, portalTrackingService),
             this
         );
         Bukkit.getPluginManager().registerEvents(
@@ -101,4 +124,3 @@ public final class HuntCorePlugin extends JavaPlugin {
         command.setExecutor(executor);
     }
 }
-

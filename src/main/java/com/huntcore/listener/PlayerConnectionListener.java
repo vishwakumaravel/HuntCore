@@ -36,26 +36,32 @@ public final class PlayerConnectionListener implements Listener {
         playerRegistry.registerPlayer(player);
 
         Bukkit.getScheduler().runTask(plugin, () -> {
+            if (gameManager.handlePlayerJoin(player)) {
+                return;
+            }
+
             lobbyService.sendToLobby(player, true);
+            if (gameManager.isLiveMatchState()) {
+                player.sendMessage("[HuntCore] A match is already running. Use /spectate to watch or wait in the lobby.");
+                return;
+            }
+
             if (gameManager.isWaitingState()) {
                 gameManager.handleLobbyStateChange();
             }
+
+            player.sendMessage("[HuntCore] Welcome. Choose /runner, /hunter, or /spectate.");
+            player.sendMessage("[HuntCore] Active players use /ready when their role is set.");
         });
-
-        if (gameManager.isLiveMatchState()) {
-            player.sendMessage("[HuntCore] A match is already running. You are waiting in the lobby.");
-            return;
-        }
-
-        player.sendMessage("[HuntCore] Welcome. Choose /runner or /hunter, then use /ready.");
     }
 
     @EventHandler
     public void onPlayerQuit(PlayerQuitEvent event) {
         Player player = event.getPlayer();
         gameManager.handlePlayerQuit(player);
-        playerRegistry.removePlayer(player.getUniqueId());
+        if (!gameManager.shouldKeepPlayerRegisteredOnQuit(player.getUniqueId())) {
+            playerRegistry.removePlayer(player.getUniqueId());
+        }
         gameManager.handleLobbyStateChange();
     }
 }
-

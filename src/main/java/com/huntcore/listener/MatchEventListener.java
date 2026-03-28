@@ -2,39 +2,32 @@ package com.huntcore.listener;
 
 import com.huntcore.HuntCorePlugin;
 import com.huntcore.game.GameManager;
-import com.huntcore.game.LobbyService;
 import org.bukkit.Location;
+import org.bukkit.NamespacedKey;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
-import org.bukkit.event.entity.EntityDamageEvent;
 import org.bukkit.event.entity.FoodLevelChangeEvent;
 import org.bukkit.event.entity.PlayerDeathEvent;
+import org.bukkit.event.player.PlayerAdvancementDoneEvent;
 import org.bukkit.event.player.PlayerMoveEvent;
 import org.bukkit.event.player.PlayerRespawnEvent;
 
 public final class MatchEventListener implements Listener {
 
+    private static final NamespacedKey KILL_DRAGON_ADVANCEMENT = NamespacedKey.minecraft("end/kill_dragon");
+
     private final HuntCorePlugin plugin;
-    private final LobbyService lobbyService;
     private final GameManager gameManager;
 
-    public MatchEventListener(HuntCorePlugin plugin, LobbyService lobbyService, GameManager gameManager) {
+    public MatchEventListener(HuntCorePlugin plugin, GameManager gameManager) {
         this.plugin = plugin;
-        this.lobbyService = lobbyService;
         this.gameManager = gameManager;
     }
 
     @EventHandler(ignoreCancelled = true)
-    public void onPlayerDamage(EntityDamageEvent event) {
-        if (event.getEntity() instanceof Player player && gameManager.shouldApplyLobbyProtections(player.getUniqueId())) {
-            event.setCancelled(true);
-        }
-    }
-
-    @EventHandler(ignoreCancelled = true)
     public void onFoodLevelChange(FoodLevelChangeEvent event) {
-        if (event.getEntity() instanceof Player player && gameManager.shouldApplyLobbyProtections(player.getUniqueId())) {
+        if (event.getEntity() instanceof Player player && gameManager.shouldPreventHunger(player.getUniqueId())) {
             event.setCancelled(true);
         }
     }
@@ -48,19 +41,35 @@ public final class MatchEventListener implements Listener {
         }
 
         if (gameManager.isActiveHunter(player.getUniqueId())) {
-            gameManager.handleHunterElimination(player);
+            if (gameManager.shouldHuntersKeepInventory()) {
+                event.setKeepInventory(true);
+                event.setKeepLevel(true);
+                event.getDrops().clear();
+                event.setDroppedExp(0);
+            }
+            gameManager.handleHunterDeath(player);
         }
     }
 
     @EventHandler
     public void onPlayerRespawn(PlayerRespawnEvent event) {
         Player player = event.getPlayer();
-        if (!gameManager.shouldRespawnInLobby(player.getUniqueId())) {
+        Location respawnLocation = gameManager.getRespawnLocation(player);
+        if (respawnLocation == null) {
             return;
         }
 
-        event.setRespawnLocation(lobbyService.getLobbySpawn(player));
-        plugin.getServer().getScheduler().runTask(plugin, () -> lobbyService.prepareForLobby(player, true));
+        event.setRespawnLocation(respawnLocation);
+        plugin.getServer().getScheduler().runTask(plugin, () -> gameManager.handlePostRespawn(player));
+    }
+
+    @EventHandler
+    public void onPlayerAdvancementDone(PlayerAdvancementDoneEvent event) {
+        if (!event.getAdvancement().getKey().equals(KILL_DRAGON_ADVANCEMENT)) {
+            return;
+        }
+
+        gameManager.handleRunnerDragonKill(event.getPlayer());
     }
 
     @EventHandler(ignoreCancelled = true)
