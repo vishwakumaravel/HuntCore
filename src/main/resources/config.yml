@@ -1,0 +1,26 @@
+# HuntCore default configuration.
+
+lobby:
+  world: world
+  use-world-spawn: true
+  x: 0.5
+  y: 64.0
+  z: 0.5
+  yaw: 0.0
+  pitch: 0.0
+
+countdowns:
+  match-start-seconds: 15
+  hunter-head-start-seconds: 20
+
+match:
+  world: world
+  spawn-radius: 2000
+  spawn-attempts: 40
+  structure-search-radius-chunks: 80
+
+tracking:
+  compass-update-ticks: 20
+
+end-of-match:
+  return-to-lobby-seconds: 5

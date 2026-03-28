@@ -1,0 +1,20 @@
+name: HuntCore
+version: ${version}
+main: com.huntcore.HuntCorePlugin
+api-version: '1.21'
+description: Lightweight hunt-style minigame plugin for Paper servers.
+author: HuntCore
+commands:
+  runner:
+    description: Select the runner role.
+    usage: /runner
+  hunter:
+    description: Select the hunter role.
+    usage: /hunter
+  ready:
+    description: Mark yourself as ready.
+    usage: /ready
+  unready:
+    description: Remove your ready status.
+    usage: /unready
+
