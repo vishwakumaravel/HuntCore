@@ -13,9 +13,6 @@ import org.bukkit.potion.PotionEffect;
 
 public final class LobbyService {
 
-    private static final int LOBBY_FOOD_LEVEL = 16;
-    private static final float LOBBY_SATURATION = 0.0f;
-
     private final PluginConfig pluginConfig;
     private final TeleportSafetyService teleportSafetyService;
 
@@ -40,8 +37,7 @@ public final class LobbyService {
         if (maxHealth != null) {
             player.setHealth(maxHealth.getValue());
         }
-        player.setFoodLevel(LOBBY_FOOD_LEVEL);
-        player.setSaturation(LOBBY_SATURATION);
+        PlayerVitals.applySurvivalMatchNutrition(player);
         player.setFireTicks(0);
         player.setFallDistance(0.0f);
         player.setExp(0.0f);

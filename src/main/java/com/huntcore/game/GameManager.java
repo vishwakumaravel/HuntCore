@@ -266,12 +266,20 @@ public final class GameManager {
     }
 
     public boolean shouldPreventHunger(UUID playerId) {
-        if (currentMatch == null) {
+        if (isSpectator(playerId)) {
             return true;
         }
 
+        if (currentMatch == null) {
+            return false;
+        }
+
         if (gameState == GameState.PAUSED) {
-            return true;
+            return currentMatch.involves(playerId);
+        }
+
+        if (!currentMatch.involves(playerId)) {
+            return false;
         }
 
         return !isActiveRunner(playerId) && !isActiveHunter(playerId);
@@ -1510,8 +1518,7 @@ public final class GameManager {
             player.setHealth(maxHealth.getValue());
         }
 
-        player.setFoodLevel(20);
-        player.setSaturation(20.0f);
+        PlayerVitals.applySurvivalMatchNutrition(player);
         player.setFireTicks(0);
         player.setFallDistance(0.0f);
         player.setExp(0.0f);
@@ -1533,8 +1540,7 @@ public final class GameManager {
             player.setHealth(maxHealth.getValue());
         }
 
-        player.setFoodLevel(20);
-        player.setSaturation(20.0f);
+        PlayerVitals.applySurvivalMatchNutrition(player);
         player.setFireTicks(0);
         player.setFallDistance(0.0f);
         player.setInvulnerable(false);

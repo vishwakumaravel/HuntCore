@@ -3,6 +3,7 @@ package com.huntcore.pvp;
 import com.huntcore.config.PluginConfig;
 import com.huntcore.game.GameManager;
 import com.huntcore.game.LobbyService;
+import com.huntcore.game.PlayerVitals;
 import com.huntcore.game.PlayerRegistry;
 import com.huntcore.game.PlayerRole;
 import com.huntcore.game.TeleportSafetyService;
@@ -21,9 +22,6 @@ import org.bukkit.inventory.meta.CrossbowMeta;
 import org.bukkit.potion.PotionEffect;
 
 public final class PvpArenaManager {
-
-    private static final int PVP_STARTING_FOOD_LEVEL = 12;
-    private static final float PVP_STARTING_SATURATION = 0.0f;
 
     private final PluginConfig pluginConfig;
     private final PlayerRegistry playerRegistry;
@@ -215,8 +213,7 @@ public final class PvpArenaManager {
             player.setHealth(maxHealth.getValue());
         }
 
-        player.setFoodLevel(PVP_STARTING_FOOD_LEVEL);
-        player.setSaturation(PVP_STARTING_SATURATION);
+        PlayerVitals.applySurvivalMatchNutrition(player);
         equipKit(player.getInventory());
     }
 
