@@ -28,12 +28,23 @@ public final class MatchContext {
         StructureHint structureHint,
         MatchWorldSet matchWorldSet
     ) {
+        this(runnerId, hunterIds, matchSpawn, structureHint, matchWorldSet, System.currentTimeMillis());
+    }
+
+    public MatchContext(
+        UUID runnerId,
+        List<UUID> hunterIds,
+        Location matchSpawn,
+        StructureHint structureHint,
+        MatchWorldSet matchWorldSet,
+        long startedAtMillis
+    ) {
         this.runnerId = runnerId;
         this.hunterIds = new ArrayList<>(hunterIds);
         this.matchSpawn = matchSpawn.clone();
         this.structureHint = structureHint;
         this.matchWorldSet = matchWorldSet;
-        this.startedAtMillis = System.currentTimeMillis();
+        this.startedAtMillis = startedAtMillis;
     }
 
     public UUID getRunnerId() {

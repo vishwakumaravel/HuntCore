@@ -37,7 +37,7 @@ If you already have Gradle installed, `gradle build` works too.
 1. Build the plugin jar.
 2. Copy the jar from `build/libs/` into your Paper server's `plugins/` folder.
 3. Start the server once so `plugins/HuntCore/config.yml` is created.
-4. Adjust `config.yml` values if you want a custom lobby spawn, different countdowns, or a different temporary match world prefix.
+4. Adjust `config.yml` values if you want a custom lobby spawn, PvP arena spawn, different countdowns, or a different temporary match world prefix.
 5. Restart the server.
 
 To use a downloaded parkour world as the waiting lobby:
@@ -45,6 +45,12 @@ To use a downloaded parkour world as the waiting lobby:
 1. Run `/installlobbymap <zip-path> [world-name]`
 2. Let HuntCore import the map as a separate lobby world
 3. Use `/setlobby` if you want a more precise spawn point than the imported world spawn
+
+To use a downloaded PvP world as the arena:
+
+1. Run `/installpvpmap <zip-path> [world-name]`
+2. Let HuntCore import the map as a separate PvP world
+3. Use `/setpvpspawn` if you want a precise combat respawn point
 
 ## Open In VS Code
 
@@ -63,14 +69,23 @@ To use a downloaded parkour world as the waiting lobby:
 - `/unready` removes ready status
 - `/hunterkeepinventory <on|off|toggle|status>` changes whether hunters keep items and XP on death
 - `/setlobby` saves your current location as the waiting lobby spawn
+- `/setpvpspawn` saves your current location as the PvP arena spawn
+- `/reset` returns you to the waiting lobby spawn
+- `/pvp` enters the PvP arena with a fixed diamond loadout
+- `/pvpleave` restores your saved state and leaves the PvP arena
+- `/pause` pauses the active match so players can disconnect and reconnect safely
+- `/unpause` resumes a paused match once the runner and at least one hunter are online
 - `/installlobbymap [zip-path] [world-name]` imports a world zip as a dedicated waiting lobby world
+- `/installpvpmap [zip-path] [world-name]` imports a world zip as a dedicated PvP arena world
 
 ## Config Notes
 
 The default config includes:
 
 - Lobby world and spawn settings
+- PvP world and spawn settings
 - Optional lobby zip import path and world-name defaults
+- Optional PvP zip import path and world-name defaults
 - The lobby can be a separate sky platform or prebuilt parkour area
 - Temporary match world prefix
 - Match start countdown length
@@ -89,13 +104,23 @@ The default config includes:
 - Hunters respawn infinitely and stay in the same match after death
 - Matches create fresh temporary overworld, Nether, and End worlds for each round
 - Match participants get a reconnect grace period and are restored into the round if they return in time
-- The dragon-kill advancement is reset for match participants at round start so repeated matches can still end correctly
+- Paused matches stay suspended until `/unpause`, and pause mode disables disconnect-loss timers
+- Paused matches also survive a clean Paper server stop/start, and the match worlds are kept until the round resumes or ends
+- Runner and hunter advancements are reset fully at the start of each round so match progress is fresh every time
 - Spectators are separate from active roles and do not affect ready checks or win conditions
 - The lobby stays in Adventure mode
 - The waiting lobby can be moved in game with `/setlobby`, which is useful for sky parkour hubs
 - Downloaded parkour maps can be imported as a separate lobby world with `/installlobbymap`
+- Waiting-lobby PvP is available with `/pvp` and `/pvpleave`, with saved state restore when you leave
+- Downloaded PvP arena maps can be imported as a separate world with `/installpvpmap`
 - Hunter compasses track directly in the same dimension and fall back to recent runner portal locations across dimensions
 - The structure hint is a rough direction toward a nearby village, ruined portal, or pillager outpost
+
+## Arena Map Note
+
+- `minecraft-pvp-arena.zip` is a valid Minecraft world archive, but it was last saved as a 1.17.1 Fabric world
+- Paper 1.21.x will need to upgrade it on first load, so it is likely usable if it only contains vanilla world data
+- If Paper cannot load it cleanly, HuntCore will leave the import unfinished and show the failure message instead of partially switching the arena
 
 ## Current Limitations / TODO
 

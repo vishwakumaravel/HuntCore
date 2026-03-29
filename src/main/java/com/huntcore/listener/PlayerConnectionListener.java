@@ -4,6 +4,7 @@ import com.huntcore.HuntCorePlugin;
 import com.huntcore.game.GameManager;
 import com.huntcore.game.LobbyService;
 import com.huntcore.game.PlayerRegistry;
+import com.huntcore.pvp.PvpArenaManager;
 import org.bukkit.Bukkit;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
@@ -17,17 +18,20 @@ public final class PlayerConnectionListener implements Listener {
     private final PlayerRegistry playerRegistry;
     private final LobbyService lobbyService;
     private final GameManager gameManager;
+    private final PvpArenaManager pvpArenaManager;
 
     public PlayerConnectionListener(
         HuntCorePlugin plugin,
         PlayerRegistry playerRegistry,
         LobbyService lobbyService,
-        GameManager gameManager
+        GameManager gameManager,
+        PvpArenaManager pvpArenaManager
     ) {
         this.plugin = plugin;
         this.playerRegistry = playerRegistry;
         this.lobbyService = lobbyService;
         this.gameManager = gameManager;
+        this.pvpArenaManager = pvpArenaManager;
     }
 
     @EventHandler
@@ -36,6 +40,10 @@ public final class PlayerConnectionListener implements Listener {
         playerRegistry.registerPlayer(player);
 
         Bukkit.getScheduler().runTask(plugin, () -> {
+            if (pvpArenaManager.handlePlayerJoin(player)) {
+                return;
+            }
+
             if (gameManager.handlePlayerJoin(player)) {
                 return;
             }
@@ -59,7 +67,8 @@ public final class PlayerConnectionListener implements Listener {
     public void onPlayerQuit(PlayerQuitEvent event) {
         Player player = event.getPlayer();
         gameManager.handlePlayerQuit(player);
-        if (!gameManager.shouldKeepPlayerRegisteredOnQuit(player.getUniqueId())) {
+        if (!gameManager.shouldKeepPlayerRegisteredOnQuit(player.getUniqueId())
+            && !pvpArenaManager.shouldKeepPlayerRegisteredOnQuit(player.getUniqueId())) {
             playerRegistry.removePlayer(player.getUniqueId());
         }
         gameManager.handleLobbyStateChange();

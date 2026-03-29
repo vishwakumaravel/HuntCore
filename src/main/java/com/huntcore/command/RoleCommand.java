@@ -3,6 +3,7 @@ package com.huntcore.command;
 import com.huntcore.game.GameManager;
 import com.huntcore.game.PlayerRegistry;
 import com.huntcore.game.PlayerRole;
+import com.huntcore.pvp.PvpArenaManager;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandExecutor;
 import org.bukkit.command.CommandSender;
@@ -12,11 +13,13 @@ public final class RoleCommand implements CommandExecutor {
 
     private final PlayerRegistry playerRegistry;
     private final GameManager gameManager;
+    private final PvpArenaManager pvpArenaManager;
     private final PlayerRole role;
 
-    public RoleCommand(PlayerRegistry playerRegistry, GameManager gameManager, PlayerRole role) {
+    public RoleCommand(PlayerRegistry playerRegistry, GameManager gameManager, PvpArenaManager pvpArenaManager, PlayerRole role) {
         this.playerRegistry = playerRegistry;
         this.gameManager = gameManager;
+        this.pvpArenaManager = pvpArenaManager;
         this.role = role;
     }
 
@@ -29,6 +32,11 @@ public final class RoleCommand implements CommandExecutor {
 
         if (gameManager.isRoleSelectionLocked(player)) {
             player.sendMessage("[HuntCore] You are already part of the active round.");
+            return true;
+        }
+
+        if (pvpArenaManager.isPvpParticipant(player.getUniqueId())) {
+            player.sendMessage("[HuntCore] Leave the PvP arena with /pvpleave before changing roles.");
             return true;
         }
 

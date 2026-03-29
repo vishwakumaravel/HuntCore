@@ -28,9 +28,34 @@ commands:
     description: Set the waiting lobby to your current location.
     usage: /setlobby
     permission: huntcore.admin
+  setpvpspawn:
+    description: Set the PvP arena spawn to your current location.
+    usage: /setpvpspawn
+    permission: huntcore.admin
+  reset:
+    description: Return to the waiting lobby spawn.
+    usage: /reset
+  pvp:
+    description: Enter the PvP arena.
+    usage: /pvp
+  pvpleave:
+    description: Leave the PvP arena and restore your previous state.
+    usage: /pvpleave
+  pause:
+    description: Pause the active manhunt match.
+    usage: /pause
+    permission: huntcore.admin
+  unpause:
+    description: Resume the paused manhunt match.
+    usage: /unpause
+    permission: huntcore.admin
   installlobbymap:
     description: Import a world zip and use it as the waiting lobby.
     usage: /installlobbymap [zip-path] [world-name]
+    permission: huntcore.admin
+  installpvpmap:
+    description: Import a world zip and use it as the PvP arena.
+    usage: /installpvpmap [zip-path] [world-name]
     permission: huntcore.admin
 permissions:
   huntcore.admin:

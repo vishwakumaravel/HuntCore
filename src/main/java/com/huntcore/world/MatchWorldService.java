@@ -38,6 +38,19 @@ public final class MatchWorldService {
         }
     }
 
+    public void loadExistingWorldSet(MatchWorldSet worldSet) {
+        if (worldSet == null) {
+            throw new IllegalArgumentException("Match world set must not be null.");
+        }
+
+        ensureWorldFolderExists(worldSet.getOverworldName());
+        ensureWorldFolderExists(worldSet.getNetherName());
+        ensureWorldFolderExists(worldSet.getEndName());
+        loadWorld(worldSet.getOverworldName(), World.Environment.NORMAL);
+        loadWorld(worldSet.getNetherName(), World.Environment.NETHER);
+        loadWorld(worldSet.getEndName(), World.Environment.THE_END);
+    }
+
     public World getOverworld(MatchWorldSet worldSet) {
         return Bukkit.getWorld(worldSet.getOverworldName());
     }
@@ -60,6 +73,16 @@ public final class MatchWorldService {
         unloadAndDelete(worldSet.getOverworldName());
     }
 
+    public void saveWorldSet(MatchWorldSet worldSet) {
+        if (worldSet == null) {
+            return;
+        }
+
+        saveWorld(worldSet.getOverworldName());
+        saveWorld(worldSet.getNetherName());
+        saveWorld(worldSet.getEndName());
+    }
+
     private String buildBaseWorldName() {
         String prefix = pluginConfig.getMatchWorldPrefix().replaceAll("[^A-Za-z0-9_\\-]", "_");
         String suffix = Long.toHexString(ThreadLocalRandom.current().nextLong()).replace('-', '0');
@@ -78,6 +101,32 @@ public final class MatchWorldService {
 
         world.setAutoSave(false);
         return world;
+    }
+
+    private World loadWorld(String name, World.Environment environment) {
+        WorldCreator creator = new WorldCreator(name);
+        creator.environment(environment);
+        World world = Bukkit.createWorld(creator);
+        if (world == null) {
+            throw new IllegalStateException("Could not load match world: " + name);
+        }
+
+        world.setAutoSave(false);
+        return world;
+    }
+
+    private void saveWorld(String worldName) {
+        World world = Bukkit.getWorld(worldName);
+        if (world != null) {
+            world.save();
+        }
+    }
+
+    private void ensureWorldFolderExists(String worldName) {
+        Path worldPath = plugin.getServer().getWorldContainer().toPath().resolve(worldName);
+        if (!Files.exists(worldPath) || !Files.isDirectory(worldPath)) {
+            throw new IllegalStateException("Missing paused match world folder: " + worldName);
+        }
     }
 
     private void unloadAndDelete(String worldName) {

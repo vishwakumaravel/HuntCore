@@ -3,6 +3,7 @@ package com.huntcore.command;
 import com.huntcore.game.GameManager;
 import com.huntcore.game.PlayerRegistry;
 import com.huntcore.game.PlayerRole;
+import com.huntcore.pvp.PvpArenaManager;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandExecutor;
 import org.bukkit.command.CommandSender;
@@ -12,11 +13,13 @@ public final class ReadyCommand implements CommandExecutor {
 
     private final PlayerRegistry playerRegistry;
     private final GameManager gameManager;
+    private final PvpArenaManager pvpArenaManager;
     private final boolean readyValue;
 
-    public ReadyCommand(PlayerRegistry playerRegistry, GameManager gameManager, boolean readyValue) {
+    public ReadyCommand(PlayerRegistry playerRegistry, GameManager gameManager, PvpArenaManager pvpArenaManager, boolean readyValue) {
         this.playerRegistry = playerRegistry;
         this.gameManager = gameManager;
+        this.pvpArenaManager = pvpArenaManager;
         this.readyValue = readyValue;
     }
 
@@ -29,6 +32,11 @@ public final class ReadyCommand implements CommandExecutor {
 
         if (!gameManager.isLobbyEditable()) {
             player.sendMessage("[HuntCore] Ready status can only be changed in the lobby.");
+            return true;
+        }
+
+        if (pvpArenaManager.isPvpParticipant(player.getUniqueId())) {
+            player.sendMessage("[HuntCore] Leave the PvP arena with /pvpleave before changing ready status.");
             return true;
         }
 

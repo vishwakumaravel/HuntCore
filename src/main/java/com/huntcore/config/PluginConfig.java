@@ -65,7 +65,7 @@ public final class PluginConfig {
 
     public Location getLobbySpawn(Server server) {
         FileConfiguration config = plugin.getConfig();
-        World world = server.getWorld(config.getString("lobby.world", "world"));
+        World world = server.getWorld(getLobbyWorldName());
         if (world == null) {
             world = getFallbackWorld(server);
         }
@@ -96,6 +96,43 @@ public final class PluginConfig {
         return plugin.getConfig().getString("lobby.map-world-name", "huntcore_parkour_lobby");
     }
 
+    public String getLobbyWorldName() {
+        return plugin.getConfig().getString("lobby.world", "world");
+    }
+
+    public Location getPvpSpawn(Server server) {
+        FileConfiguration config = plugin.getConfig();
+        World world = server.getWorld(getPvpWorldName());
+        if (world == null) {
+            throw new IllegalStateException("The configured PvP world is not loaded: " + getPvpWorldName());
+        }
+
+        if (config.getBoolean("pvp.use-world-spawn", true)) {
+            return world.getSpawnLocation().clone().add(0.5, 0.0, 0.5);
+        }
+
+        return new Location(
+            world,
+            config.getDouble("pvp.x", 0.5),
+            config.getDouble("pvp.y", 64.0),
+            config.getDouble("pvp.z", 0.5),
+            (float) config.getDouble("pvp.yaw", 0.0),
+            (float) config.getDouble("pvp.pitch", 0.0)
+        );
+    }
+
+    public String getPvpMapZipPath() {
+        return plugin.getConfig().getString("pvp.map-zip-path", "").trim();
+    }
+
+    public String getPvpMapWorldName() {
+        return plugin.getConfig().getString("pvp.map-world-name", "huntcore_pvp_arena");
+    }
+
+    public String getPvpWorldName() {
+        return plugin.getConfig().getString("pvp.world", "world");
+    }
+
     public void setLobbySpawn(Location location) {
         if (location == null || location.getWorld() == null) {
             throw new IllegalArgumentException("Lobby spawn location must include a world.");
@@ -118,6 +155,30 @@ public final class PluginConfig {
         }
 
         setLobbySpawn(world.getSpawnLocation().clone().add(0.5, 0.0, 0.5));
+    }
+
+    public void setPvpSpawn(Location location) {
+        if (location == null || location.getWorld() == null) {
+            throw new IllegalArgumentException("PvP spawn location must include a world.");
+        }
+
+        FileConfiguration config = plugin.getConfig();
+        config.set("pvp.world", location.getWorld().getName());
+        config.set("pvp.use-world-spawn", false);
+        config.set("pvp.x", location.getX());
+        config.set("pvp.y", location.getY());
+        config.set("pvp.z", location.getZ());
+        config.set("pvp.yaw", location.getYaw());
+        config.set("pvp.pitch", location.getPitch());
+        plugin.saveConfig();
+    }
+
+    public void setPvpToWorldSpawn(World world) {
+        if (world == null) {
+            throw new IllegalArgumentException("PvP world must not be null.");
+        }
+
+        setPvpSpawn(world.getSpawnLocation().clone().add(0.5, 0.0, 0.5));
     }
 
     private World getFallbackWorld(Server server) {

@@ -7,12 +7,12 @@ import org.bukkit.command.CommandExecutor;
 import org.bukkit.command.CommandSender;
 import org.bukkit.entity.Player;
 
-public final class SpectateCommand implements CommandExecutor {
+public final class ResetCommand implements CommandExecutor {
 
     private final GameManager gameManager;
     private final PvpArenaManager pvpArenaManager;
 
-    public SpectateCommand(GameManager gameManager, PvpArenaManager pvpArenaManager) {
+    public ResetCommand(GameManager gameManager, PvpArenaManager pvpArenaManager) {
         this.gameManager = gameManager;
         this.pvpArenaManager = pvpArenaManager;
     }
@@ -25,10 +25,9 @@ public final class SpectateCommand implements CommandExecutor {
         }
 
         if (pvpArenaManager.isPvpParticipant(player.getUniqueId())) {
-            player.sendMessage("[HuntCore] Leave the PvP arena with /pvpleave before using /spectate.");
-            return true;
+            return pvpArenaManager.leavePvpArena(player, true);
         }
 
-        return gameManager.toggleSpectatorMode(player);
+        return gameManager.resetPlayerToLobby(player);
     }
 }

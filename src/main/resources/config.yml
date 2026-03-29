@@ -1,5 +1,6 @@
 # HuntCore default configuration.
 # Each match creates a fresh temporary overworld, Nether, and End.
+# Lobby and PvP arena worlds stay persistent and can be imported from zipped world downloads.
 # The world prefix below controls the folder names used for those temporary worlds.
 # Match participants get their dragon-kill advancement reset at round start.
 # Disconnect grace controls how long players have to rejoin before the other team wins.
@@ -9,6 +10,17 @@ lobby:
   use-world-spawn: true
   map-zip-path: ""
   map-world-name: huntcore_parkour_lobby
+  x: 0.5
+  y: 64.0
+  z: 0.5
+  yaw: 0.0
+  pitch: 0.0
+
+pvp:
+  world: world
+  use-world-spawn: true
+  map-zip-path: ""
+  map-world-name: huntcore_pvp_arena
   x: 0.5
   y: 64.0
   z: 0.5

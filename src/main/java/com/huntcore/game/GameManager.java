@@ -16,7 +16,6 @@ import java.util.UUID;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
 import net.kyori.adventure.title.Title;
-import org.bukkit.NamespacedKey;
 import org.bukkit.Bukkit;
 import org.bukkit.GameMode;
 import org.bukkit.Location;
@@ -25,14 +24,13 @@ import org.bukkit.advancement.Advancement;
 import org.bukkit.attribute.Attribute;
 import org.bukkit.attribute.AttributeInstance;
 import org.bukkit.advancement.AdvancementProgress;
+import org.bukkit.command.CommandSender;
 import org.bukkit.entity.Player;
 import org.bukkit.event.player.PlayerTeleportEvent;
 import org.bukkit.potion.PotionEffect;
 import org.bukkit.scheduler.BukkitTask;
 
 public final class GameManager {
-
-    private static final NamespacedKey KILL_DRAGON_ADVANCEMENT = NamespacedKey.minecraft("end/kill_dragon");
 
     private final HuntCorePlugin plugin;
     private final PluginConfig pluginConfig;
@@ -43,6 +41,7 @@ public final class GameManager {
     private final StructureHintService structureHintService;
     private final MatchCountdown matchCountdown;
     private final CompassTracker compassTracker;
+    private final PausedMatchStore pausedMatchStore;
 
     private GameState gameState = GameState.LOBBY;
     private MatchContext currentMatch;
@@ -50,6 +49,8 @@ public final class GameManager {
     private BukkitTask endTask;
     private BukkitTask runnerDisconnectTask;
     private BukkitTask huntersDisconnectTask;
+    private GameState pausedResumeState = GameState.IN_GAME;
+    private int headStartSecondsRemaining;
 
     public GameManager(
         HuntCorePlugin plugin,
@@ -60,7 +61,8 @@ public final class GameManager {
         MatchWorldService matchWorldService,
         StructureHintService structureHintService,
         MatchCountdown matchCountdown,
-        CompassTracker compassTracker
+        CompassTracker compassTracker,
+        PausedMatchStore pausedMatchStore
     ) {
         this.plugin = plugin;
         this.pluginConfig = pluginConfig;
@@ -71,6 +73,7 @@ public final class GameManager {
         this.structureHintService = structureHintService;
         this.matchCountdown = matchCountdown;
         this.compassTracker = compassTracker;
+        this.pausedMatchStore = pausedMatchStore;
     }
 
     public GameState getGameState() {
@@ -89,8 +92,20 @@ public final class GameManager {
         return gameState == GameState.HEAD_START || gameState == GameState.IN_GAME;
     }
 
+    public boolean isPausedMatchState() {
+        return gameState == GameState.PAUSED;
+    }
+
     public boolean isHunterFrozen(Player player) {
         return gameState == GameState.HEAD_START && currentMatch != null && currentMatch.isHunter(player.getUniqueId());
+    }
+
+    public boolean isMovementLocked(Player player) {
+        if (currentMatch == null || !currentMatch.involves(player.getUniqueId())) {
+            return false;
+        }
+
+        return gameState == GameState.PAUSED || isHunterFrozen(player);
     }
 
     public boolean isActiveRunner(UUID playerId) {
@@ -105,8 +120,16 @@ public final class GameManager {
         return playerRegistry.getRole(playerId) == PlayerRole.SPECTATOR;
     }
 
+    public boolean hasPausedMatch() {
+        return currentMatch != null && gameState == GameState.PAUSED;
+    }
+
     public boolean shouldPreventHunger(UUID playerId) {
         if (currentMatch == null) {
+            return true;
+        }
+
+        if (gameState == GameState.PAUSED) {
             return true;
         }
 
@@ -124,7 +147,9 @@ public final class GameManager {
     }
 
     public boolean isRoleSelectionLocked(Player player) {
-        return currentMatch != null && currentMatch.involves(player.getUniqueId()) && (isLiveMatchState() || gameState == GameState.ENDING);
+        return currentMatch != null
+            && currentMatch.involves(player.getUniqueId())
+            && (isLiveMatchState() || gameState == GameState.PAUSED || gameState == GameState.ENDING);
     }
 
     public String getLobbyStatusSummary() {
@@ -212,7 +237,7 @@ public final class GameManager {
     }
 
     public void handlePlayerQuit(Player player) {
-        if ((!isLiveMatchState() && gameState != GameState.ENDING) || currentMatch == null) {
+        if ((!isLiveMatchState() && gameState != GameState.PAUSED && gameState != GameState.ENDING) || currentMatch == null) {
             return;
         }
 
@@ -221,6 +246,11 @@ public final class GameManager {
         }
 
         rememberParticipantLocation(player, player.getLocation());
+
+        if (gameState == GameState.PAUSED) {
+            persistPausedMatch();
+            return;
+        }
 
         if (currentMatch.isRunner(player.getUniqueId()) && gameState != GameState.ENDING) {
             startRunnerDisconnectTimer(player.getName());
@@ -233,31 +263,54 @@ public final class GameManager {
     }
 
     public boolean shouldKeepPlayerRegisteredOnQuit(UUID playerId) {
-        return currentMatch != null && currentMatch.involves(playerId) && isLiveMatchState();
+        return currentMatch != null && currentMatch.involves(playerId) && (isLiveMatchState() || gameState == GameState.PAUSED);
     }
 
     public boolean handlePlayerJoin(Player player) {
-        if (currentMatch == null || !currentMatch.involves(player.getUniqueId()) || !isLiveMatchState()) {
+        if (currentMatch == null || !currentMatch.involves(player.getUniqueId()) || (!isLiveMatchState() && gameState != GameState.PAUSED)) {
             return false;
         }
 
         if (currentMatch.isRunner(player.getUniqueId())) {
+            playerRegistry.setRole(player.getUniqueId(), PlayerRole.RUNNER);
             cancelTask(runnerDisconnectTask);
             runnerDisconnectTask = null;
             prepareReturningRunner(player, resolveRunnerReturnLocation());
-            player.sendMessage("[HuntCore] You rejoined the match.");
+            if (gameState == GameState.PAUSED) {
+                applyPausedParticipantState(player);
+                player.sendMessage("[HuntCore] You rejoined the paused match.");
+            } else {
+                player.sendMessage("[HuntCore] You rejoined the match.");
+            }
             return true;
         }
 
         if (currentMatch.isHunter(player.getUniqueId())) {
+            playerRegistry.setRole(player.getUniqueId(), PlayerRole.HUNTER);
             cancelTask(huntersDisconnectTask);
             huntersDisconnectTask = null;
             prepareReturningHunter(player, resolveHunterReturnLocation(player.getUniqueId()));
-            player.sendMessage("[HuntCore] You rejoined the hunt.");
+            if (gameState == GameState.PAUSED) {
+                applyPausedParticipantState(player);
+                player.sendMessage("[HuntCore] You rejoined the paused match.");
+            } else {
+                player.sendMessage("[HuntCore] You rejoined the hunt.");
+            }
             return true;
         }
 
         return false;
+    }
+
+    public boolean resetPlayerToLobby(Player player) {
+        if (isRoleSelectionLocked(player)) {
+            player.sendMessage("[HuntCore] Active runners and hunters cannot use /reset during a live round.");
+            return true;
+        }
+
+        lobbyService.sendToLobby(player, true);
+        player.sendMessage("[HuntCore] Returned to the lobby spawn.");
+        return true;
     }
 
     public boolean toggleSpectatorMode(Player player) {
@@ -290,14 +343,14 @@ public final class GameManager {
         return true;
     }
 
-    public Location getRespawnLocation(Player player) {
+    public Location getRespawnLocation(Player player, Location vanillaRespawnLocation) {
         if (currentMatch == null) {
             return null;
         }
 
         UUID playerId = player.getUniqueId();
-        if (currentMatch.isHunter(playerId) && isLiveMatchState()) {
-            Location hunterRespawn = spreadHunterSpawn(currentMatch.getMatchSpawn(), currentMatch.getHunterSpawnIndex(playerId));
+        if (currentMatch.isHunter(playerId) && (isLiveMatchState() || gameState == GameState.PAUSED)) {
+            Location hunterRespawn = resolveHunterRespawnLocation(playerId, vanillaRespawnLocation);
             currentMatch.rememberParticipantLocation(playerId, hunterRespawn);
             return hunterRespawn;
         }
@@ -315,8 +368,11 @@ public final class GameManager {
         }
 
         UUID playerId = player.getUniqueId();
-        if (currentMatch.isHunter(playerId) && isLiveMatchState()) {
+        if (currentMatch.isHunter(playerId) && (isLiveMatchState() || gameState == GameState.PAUSED)) {
             prepareHunterForRespawn(player);
+            if (gameState == GameState.PAUSED) {
+                applyPausedParticipantState(player);
+            }
             return;
         }
 
@@ -331,9 +387,144 @@ public final class GameManager {
         cancelTask(endTask);
         cancelTask(runnerDisconnectTask);
         cancelTask(huntersDisconnectTask);
+        headStartTask = null;
+        endTask = null;
+        runnerDisconnectTask = null;
+        huntersDisconnectTask = null;
         compassTracker.stop();
+        if (hasPausedMatch()) {
+            persistPausedMatch();
+            matchWorldService.saveWorldSet(currentMatch.getMatchWorldSet());
+            return;
+        }
+
+        clearPausedMatchPersistence();
         compassTracker.resetTrackingState();
+        pausedResumeState = GameState.IN_GAME;
+        headStartSecondsRemaining = 0;
         cleanupActiveMatchWorlds();
+    }
+
+    public void restorePausedMatchIfPresent() {
+        if (!pausedMatchStore.exists()) {
+            return;
+        }
+
+        PausedMatchStore.PausedMatchSnapshot snapshot = pausedMatchStore.load();
+        if (snapshot == null) {
+            plugin.getLogger().warning("Paused match snapshot could not be read. Leaving it untouched for manual recovery.");
+            return;
+        }
+
+        try {
+            matchWorldService.loadExistingWorldSet(snapshot.matchWorldSet());
+            currentMatch = new MatchContext(
+                snapshot.runnerId(),
+                snapshot.hunterIds(),
+                toLocation(snapshot.matchSpawn()),
+                null,
+                snapshot.matchWorldSet(),
+                snapshot.startedAtMillis()
+            );
+            Location runnerLastKnownLocation = toLocation(snapshot.runnerLastKnownLocation());
+            if (runnerLastKnownLocation != null) {
+                currentMatch.rememberParticipantLocation(snapshot.runnerId(), runnerLastKnownLocation);
+            }
+            for (var entry : snapshot.hunterLastKnownLocations().entrySet()) {
+                Location hunterLocation = toLocation(entry.getValue());
+                if (hunterLocation != null) {
+                    currentMatch.rememberParticipantLocation(entry.getKey(), hunterLocation);
+                }
+            }
+
+            pausedResumeState = snapshot.resumeState();
+            headStartSecondsRemaining = snapshot.headStartSecondsRemaining();
+            gameState = GameState.PAUSED;
+            compassTracker.resetTrackingState();
+            plugin.getLogger().info("Restored a paused HuntCore match. Use /unpause once the runner and at least one hunter are online.");
+        } catch (RuntimeException exception) {
+            plugin.getLogger().warning(
+                "Could not restore paused match worlds. The paused snapshot was left in place for manual recovery: "
+                    + exception.getMessage()
+            );
+            currentMatch = null;
+            gameState = GameState.LOBBY;
+            pausedResumeState = GameState.IN_GAME;
+            headStartSecondsRemaining = 0;
+        }
+    }
+
+    public boolean pauseMatch(CommandSender sender) {
+        if (!isLiveMatchState() || currentMatch == null) {
+            sender.sendMessage("[HuntCore] There is no active match to pause.");
+            return true;
+        }
+
+        pausedResumeState = gameState;
+        cancelTask(headStartTask);
+        headStartTask = null;
+        cancelTask(runnerDisconnectTask);
+        runnerDisconnectTask = null;
+        cancelTask(huntersDisconnectTask);
+        huntersDisconnectTask = null;
+        compassTracker.stop();
+        gameState = GameState.PAUSED;
+
+        for (Player player : getActiveOnlineParticipants()) {
+            applyPausedParticipantState(player);
+        }
+
+        persistPausedMatch();
+        Bukkit.broadcastMessage("[HuntCore] Match paused. Players may disconnect until /unpause.");
+        return true;
+    }
+
+    public boolean unpauseMatch(CommandSender sender) {
+        if (gameState != GameState.PAUSED || currentMatch == null) {
+            sender.sendMessage("[HuntCore] There is no paused match to resume.");
+            return true;
+        }
+
+        Player runner = Bukkit.getPlayer(currentMatch.getRunnerId());
+        if (runner == null || !runner.isOnline()) {
+            sender.sendMessage("[HuntCore] The runner must be online before the match can resume.");
+            return true;
+        }
+
+        List<Player> hunters = getActiveOnlineHunters();
+        if (hunters.isEmpty()) {
+            sender.sendMessage("[HuntCore] At least one hunter must be online before the match can resume.");
+            return true;
+        }
+
+        for (Player player : getActiveOnlineParticipants()) {
+            clearPausedParticipantState(player);
+        }
+
+        clearPausedMatchPersistence();
+
+        if (pausedResumeState == GameState.HEAD_START && headStartSecondsRemaining > 0) {
+            gameState = GameState.HEAD_START;
+            Bukkit.broadcastMessage("[HuntCore] Match resumed. Hunters release in " + headStartSecondsRemaining + " seconds.");
+            resumeHeadStart(runner);
+            return true;
+        }
+
+        gameState = GameState.IN_GAME;
+        pausedResumeState = GameState.IN_GAME;
+        headStartSecondsRemaining = 0;
+        for (Player hunter : hunters) {
+            compassTracker.giveHunterCompass(hunter);
+            hunter.sendActionBar(Component.text("Tracking resumed.", NamedTextColor.GOLD));
+        }
+
+        compassTracker.start(
+            () -> Bukkit.getPlayer(currentMatch.getRunnerId()),
+            this::getActiveOnlineHunters
+        );
+
+        Bukkit.broadcastMessage("[HuntCore] Match resumed.");
+        return true;
     }
 
     private void startMatchCountdown() {
@@ -391,7 +582,10 @@ public final class GameManager {
 
         // TODO HuntCore v2: support multiple runners and shared hunter target rules.
         StructureHint structureHint = structureHintService.findNearestHint(matchSpawn).orElse(null);
+        clearPausedMatchPersistence();
         compassTracker.resetTrackingState();
+        pausedResumeState = GameState.IN_GAME;
+        headStartSecondsRemaining = 0;
         currentMatch = new MatchContext(
             runner.getUniqueId(),
             hunters.stream().map(Player::getUniqueId).toList(),
@@ -412,9 +606,9 @@ public final class GameManager {
             currentMatch.rememberParticipantLocation(hunter.getUniqueId(), hunterSpawn);
         }
 
-        resetDragonAdvancement(runner);
+        resetAllAdvancements(runner);
         for (Player hunter : hunters) {
-            resetDragonAdvancement(hunter);
+            resetAllAdvancements(hunter);
         }
 
         gameState = GameState.HEAD_START;
@@ -442,28 +636,36 @@ public final class GameManager {
             return;
         }
 
+        startHeadStartCountdown(runner, headStartSeconds);
+    }
+
+    private void startHeadStartCountdown(Player runner, int headStartSeconds) {
+        headStartSecondsRemaining = headStartSeconds;
         runner.sendMessage("[HuntCore] Run. Hunters are released in " + headStartSeconds + " seconds.");
         for (Player hunter : getActiveOnlineHunters()) {
             hunter.sendMessage("[HuntCore] Wait for the head start. Release in " + headStartSeconds + " seconds.");
         }
         sendHeadStartActionBar(headStartSeconds);
 
-        final int[] remaining = {headStartSeconds};
         headStartTask = Bukkit.getScheduler().runTaskTimer(plugin, () -> {
-            remaining[0]--;
+            headStartSecondsRemaining--;
 
-            if (remaining[0] <= 0) {
+            if (headStartSecondsRemaining <= 0) {
                 cancelTask(headStartTask);
                 headStartTask = null;
                 releaseHunters(runner);
                 return;
             }
 
-            sendHeadStartActionBar(remaining[0]);
-            if (remaining[0] <= 5) {
-                Bukkit.broadcastMessage("[HuntCore] Hunters release in " + remaining[0] + "...");
+            sendHeadStartActionBar(headStartSecondsRemaining);
+            if (headStartSecondsRemaining <= 5) {
+                Bukkit.broadcastMessage("[HuntCore] Hunters release in " + headStartSecondsRemaining + "...");
             }
         }, 20L, 20L);
+    }
+
+    private void resumeHeadStart(Player runner) {
+        startHeadStartCountdown(runner, headStartSecondsRemaining);
     }
 
     private void releaseHunters(Player runner) {
@@ -472,6 +674,8 @@ public final class GameManager {
         }
 
         gameState = GameState.IN_GAME;
+        pausedResumeState = GameState.IN_GAME;
+        headStartSecondsRemaining = 0;
         for (Player hunter : getActiveOnlineHunters()) {
             compassTracker.giveHunterCompass(hunter);
             hunter.sendActionBar(Component.text("Track the runner.", NamedTextColor.GOLD));
@@ -500,6 +704,9 @@ public final class GameManager {
         cancelTask(huntersDisconnectTask);
         huntersDisconnectTask = null;
         compassTracker.stop();
+        clearPausedMatchPersistence();
+        pausedResumeState = GameState.IN_GAME;
+        headStartSecondsRemaining = 0;
 
         String winnerText = winner == MatchWinner.RUNNER ? "Runner" : "Hunters";
         String durationText = formatDuration(System.currentTimeMillis() - finishedMatch.getStartedAtMillis());
@@ -523,6 +730,9 @@ public final class GameManager {
         playerRegistry.resetAllReady();
         gameState = GameState.LOBBY;
         compassTracker.resetTrackingState();
+        clearPausedMatchPersistence();
+        pausedResumeState = GameState.IN_GAME;
+        headStartSecondsRemaining = 0;
         cleanupActiveMatchWorlds();
         Bukkit.broadcastMessage("[HuntCore] Returned to the lobby. Choose /runner, /hunter, or /spectate.");
     }
@@ -630,6 +840,20 @@ public final class GameManager {
         return hunters;
     }
 
+    private List<Player> getActiveOnlineParticipants() {
+        if (currentMatch == null) {
+            return List.of();
+        }
+
+        List<Player> participants = new ArrayList<>();
+        Player runner = Bukkit.getPlayer(currentMatch.getRunnerId());
+        if (runner != null && runner.isOnline()) {
+            participants.add(runner);
+        }
+        participants.addAll(getActiveOnlineHunters());
+        return participants;
+    }
+
     private void preparePlayerForMatch(Player player) {
         player.getInventory().clear();
         player.setGameMode(GameMode.SURVIVAL);
@@ -645,6 +869,7 @@ public final class GameManager {
         player.setFallDistance(0.0f);
         player.setExp(0.0f);
         player.setLevel(0);
+        player.setInvulnerable(false);
         player.setAllowFlight(false);
         player.setFlying(false);
 
@@ -665,6 +890,7 @@ public final class GameManager {
         player.setSaturation(20.0f);
         player.setFireTicks(0);
         player.setFallDistance(0.0f);
+        player.setInvulnerable(false);
         player.setAllowFlight(false);
         player.setFlying(false);
 
@@ -689,6 +915,7 @@ public final class GameManager {
             player.setHealth(maxHealth.getValue());
         }
 
+        player.setInvulnerable(false);
         player.setAllowFlight(false);
         player.setFlying(false);
         if (targetLocation != null) {
@@ -699,6 +926,7 @@ public final class GameManager {
 
     private void prepareReturningHunter(Player player, Location targetLocation) {
         player.setGameMode(GameMode.SURVIVAL);
+        player.setInvulnerable(false);
         player.setAllowFlight(false);
         player.setFlying(false);
         compassTracker.giveHunterCompass(player);
@@ -758,18 +986,6 @@ public final class GameManager {
         return null;
     }
 
-    private void resetDragonAdvancement(Player player) {
-        Advancement dragonAdvancement = Bukkit.getAdvancement(KILL_DRAGON_ADVANCEMENT);
-        if (dragonAdvancement == null) {
-            return;
-        }
-
-        AdvancementProgress progress = player.getAdvancementProgress(dragonAdvancement);
-        for (String criterion : List.copyOf(progress.getAwardedCriteria())) {
-            progress.revokeCriteria(criterion);
-        }
-    }
-
     private Location resolveRunnerReturnLocation() {
         if (currentMatch == null) {
             return null;
@@ -796,6 +1012,14 @@ public final class GameManager {
         return spreadHunterSpawn(currentMatch.getMatchSpawn(), currentMatch.getHunterSpawnIndex(hunterId));
     }
 
+    private Location resolveHunterRespawnLocation(UUID hunterId, Location vanillaRespawnLocation) {
+        if (isValidMatchLocation(vanillaRespawnLocation)) {
+            return vanillaRespawnLocation;
+        }
+
+        return spreadHunterSpawn(currentMatch.getMatchSpawn(), currentMatch.getHunterSpawnIndex(hunterId));
+    }
+
     private boolean isValidMatchLocation(Location location) {
         return location != null
             && location.getWorld() != null
@@ -817,6 +1041,16 @@ public final class GameManager {
         }
 
         currentMatch.rememberParticipantLocation(player.getUniqueId(), location);
+    }
+
+    private void resetAllAdvancements(Player player) {
+        java.util.Iterator<Advancement> iterator = Bukkit.advancementIterator();
+        while (iterator.hasNext()) {
+            AdvancementProgress progress = player.getAdvancementProgress(iterator.next());
+            for (String criterion : List.copyOf(progress.getAwardedCriteria())) {
+                progress.revokeCriteria(criterion);
+            }
+        }
     }
 
     private Location resolveScaledPortalDestination(World targetWorld, double targetX, double targetZ) {
@@ -868,6 +1102,93 @@ public final class GameManager {
         if (notify) {
             player.sendMessage("[HuntCore] You are now spectating. Use /spectate again to leave spectator mode.");
         }
+    }
+
+    private void applyPausedParticipantState(Player player) {
+        player.setInvulnerable(true);
+        player.setAllowFlight(false);
+        player.setFlying(false);
+        player.setFireTicks(0);
+        player.setFallDistance(0.0f);
+        player.sendActionBar(Component.text("Match paused", NamedTextColor.YELLOW));
+    }
+
+    private void clearPausedParticipantState(Player player) {
+        player.setInvulnerable(false);
+        player.setFireTicks(0);
+        player.setFallDistance(0.0f);
+    }
+
+    private void persistPausedMatch() {
+        if (!hasPausedMatch()) {
+            return;
+        }
+
+        try {
+            pausedMatchStore.save(
+                new PausedMatchStore.PausedMatchSnapshot(
+                    currentMatch.getRunnerId(),
+                    currentMatch.getHunterIds(),
+                    currentMatch.getMatchWorldSet(),
+                    toStoredLocation(currentMatch.getMatchSpawn()),
+                    toStoredLocation(currentMatch.getLastKnownLocation(currentMatch.getRunnerId())),
+                    buildHunterLocationSnapshot(),
+                    currentMatch.getStartedAtMillis(),
+                    pausedResumeState,
+                    headStartSecondsRemaining
+                )
+            );
+        } catch (java.io.IOException exception) {
+            plugin.getLogger().warning("Failed to save paused match snapshot: " + exception.getMessage());
+        }
+    }
+
+    private void clearPausedMatchPersistence() {
+        pausedMatchStore.delete();
+    }
+
+    private java.util.Map<UUID, PausedMatchStore.StoredLocation> buildHunterLocationSnapshot() {
+        java.util.Map<UUID, PausedMatchStore.StoredLocation> locations = new java.util.HashMap<>();
+        if (currentMatch == null) {
+            return locations;
+        }
+
+        for (UUID hunterId : currentMatch.getHunterIds()) {
+            PausedMatchStore.StoredLocation location = toStoredLocation(currentMatch.getLastKnownLocation(hunterId));
+            if (location != null) {
+                locations.put(hunterId, location);
+            }
+        }
+
+        return locations;
+    }
+
+    private PausedMatchStore.StoredLocation toStoredLocation(Location location) {
+        if (location == null || location.getWorld() == null) {
+            return null;
+        }
+
+        return new PausedMatchStore.StoredLocation(
+            location.getWorld().getName(),
+            location.getX(),
+            location.getY(),
+            location.getZ(),
+            location.getYaw(),
+            location.getPitch()
+        );
+    }
+
+    private Location toLocation(PausedMatchStore.StoredLocation location) {
+        if (location == null || location.worldName().isBlank()) {
+            return null;
+        }
+
+        World world = Bukkit.getWorld(location.worldName());
+        if (world == null) {
+            return null;
+        }
+
+        return new Location(world, location.x(), location.y(), location.z(), location.yaw(), location.pitch());
     }
 
     private void sendQueuedActionBar(String message) {

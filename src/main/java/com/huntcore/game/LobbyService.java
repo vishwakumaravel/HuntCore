@@ -37,6 +37,7 @@ public final class LobbyService {
         player.setFallDistance(0.0f);
         player.setExp(0.0f);
         player.setLevel(0);
+        player.setInvulnerable(false);
         player.setAllowFlight(false);
         player.setFlying(false);
 

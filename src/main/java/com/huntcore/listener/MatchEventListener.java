@@ -54,7 +54,7 @@ public final class MatchEventListener implements Listener {
     @EventHandler
     public void onPlayerRespawn(PlayerRespawnEvent event) {
         Player player = event.getPlayer();
-        Location respawnLocation = gameManager.getRespawnLocation(player);
+        Location respawnLocation = gameManager.getRespawnLocation(player, event.getRespawnLocation());
         if (respawnLocation == null) {
             return;
         }
@@ -75,7 +75,7 @@ public final class MatchEventListener implements Listener {
     @EventHandler(ignoreCancelled = true)
     public void onHunterMove(PlayerMoveEvent event) {
         Player player = event.getPlayer();
-        if (!gameManager.isHunterFrozen(player) || event.getTo() == null) {
+        if (!gameManager.isMovementLocked(player) || event.getTo() == null) {
             return;
         }
 
