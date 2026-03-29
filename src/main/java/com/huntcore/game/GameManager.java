@@ -9,16 +9,22 @@ import com.huntcore.world.MatchWorldService;
 import com.huntcore.world.StructureHint;
 import com.huntcore.world.StructureHintService;
 import java.time.Duration;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Deque;
 import java.util.List;
+import java.util.Locale;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
 import net.kyori.adventure.title.Title;
 import org.bukkit.Bukkit;
+import org.bukkit.Chunk;
 import org.bukkit.GameMode;
 import org.bukkit.Location;
+import org.bukkit.Material;
 import org.bukkit.World;
 import org.bukkit.advancement.Advancement;
 import org.bukkit.attribute.Attribute;
@@ -32,6 +38,19 @@ import org.bukkit.scheduler.BukkitTask;
 
 public final class GameManager {
 
+    private static final int PREPARED_MATCH_CACHE_SIZE = 2;
+    private static final int CACHE_MAINTENANCE_INTERVAL_TICKS = 20 * 20;
+    private static final int RECENT_POI_HISTORY_LIMIT = 4;
+    private static final int MATCH_SPAWN_CANDIDATE_LIMIT = 8;
+    private static final int[] PRECOMPUTE_CHUNK_RADII = {8, 14, 25};
+    private static final int IDEAL_POI_DISTANCE_BLOCKS = 220;
+    private static final int GOOD_POI_DISTANCE_BLOCKS = 300;
+    private static final int ACCEPTABLE_POI_DISTANCE_BLOCKS = 360;
+    private static final int MAX_POI_DISTANCE_BLOCKS = 400;
+    private static final int END_PLATFORM_CENTER_X = 100;
+    private static final int END_PLATFORM_CENTER_Z = 0;
+    private static final int END_PLATFORM_Y = 49;
+
     private final HuntCorePlugin plugin;
     private final PluginConfig pluginConfig;
     private final PlayerRegistry playerRegistry;
@@ -42,9 +61,17 @@ public final class GameManager {
     private final MatchCountdown matchCountdown;
     private final CompassTracker compassTracker;
     private final PausedMatchStore pausedMatchStore;
+    private final PreparedMatchStore preparedMatchStore;
+    private final MatchStatsStore matchStatsStore;
+    private final TeleportSafetyService teleportSafetyService;
 
     private GameState gameState = GameState.LOBBY;
     private MatchContext currentMatch;
+    private final List<MatchPreparation> preparedMatches = new ArrayList<>();
+    private final Deque<String> recentPoiHistory = new ArrayDeque<>();
+    private UUID activePreparationId;
+    private int preparationAttempts;
+    private BukkitTask cacheMaintenanceTask;
     private BukkitTask headStartTask;
     private BukkitTask endTask;
     private BukkitTask runnerDisconnectTask;
@@ -62,7 +89,10 @@ public final class GameManager {
         StructureHintService structureHintService,
         MatchCountdown matchCountdown,
         CompassTracker compassTracker,
-        PausedMatchStore pausedMatchStore
+        PausedMatchStore pausedMatchStore,
+        PreparedMatchStore preparedMatchStore,
+        MatchStatsStore matchStatsStore,
+        TeleportSafetyService teleportSafetyService
     ) {
         this.plugin = plugin;
         this.pluginConfig = pluginConfig;
@@ -74,6 +104,9 @@ public final class GameManager {
         this.matchCountdown = matchCountdown;
         this.compassTracker = compassTracker;
         this.pausedMatchStore = pausedMatchStore;
+        this.preparedMatchStore = preparedMatchStore;
+        this.matchStatsStore = matchStatsStore;
+        this.teleportSafetyService = teleportSafetyService;
     }
 
     public GameState getGameState() {
@@ -94,6 +127,114 @@ public final class GameManager {
 
     public boolean isPausedMatchState() {
         return gameState == GameState.PAUSED;
+    }
+
+    public void handleParticipantKill(Player killer, Player victim) {
+        if (currentMatch == null || killer == null || victim == null) {
+            return;
+        }
+
+        if (!isLiveMatchState()) {
+            return;
+        }
+
+        if (killer.getUniqueId().equals(victim.getUniqueId())) {
+            return;
+        }
+
+        if (currentMatch.involves(killer.getUniqueId()) && currentMatch.involves(victim.getUniqueId())) {
+            currentMatch.recordKill(killer.getUniqueId());
+        }
+    }
+
+    public List<String> getStatusLines() {
+        List<String> lines = new ArrayList<>();
+        lines.add("[HuntCore] State: " + formatState(gameState));
+        lines.add(
+            "[HuntCore] Prescouted worlds: "
+                + preparedMatches.size()
+                + "/"
+                + PREPARED_MATCH_CACHE_SIZE
+                + (activePreparationId == null ? " (idle)." : " (scouting).")
+        );
+        lines.add("[HuntCore] Background scouting: " + describeBackgroundScoutingStatus() + ".");
+
+        if (currentMatch != null) {
+            String runnerName = resolvePlayerName(currentMatch.getRunnerId());
+            String poiText = currentMatch.getStructureHint() == null
+                ? "none"
+                : currentMatch.getStructureHint().displayName() + " (" + currentMatch.getStructureHint().approximateDistanceBlocks() + " blocks)";
+            lines.add("[HuntCore] Active runner: " + runnerName + ".");
+            lines.add("[HuntCore] Active hunters: " + currentMatch.getHunterIds().size() + ".");
+            lines.add("[HuntCore] Match POI: " + poiText + ".");
+        } else {
+            lines.add("[HuntCore] Lobby summary: " + getLobbyStatusSummary());
+        }
+
+        if (!preparedMatches.isEmpty()) {
+            MatchPreparation bestPrepared = selectBestPreparedMatch();
+            if (bestPrepared != null && bestPrepared.structureHint() != null) {
+                lines.add(
+                    "[HuntCore] Best cached start: "
+                        + bestPrepared.structureHint().displayName()
+                        + " about "
+                        + bestPrepared.structureHint().approximateDistanceBlocks()
+                        + " blocks away."
+                );
+            }
+        }
+
+        MatchStatsStore.MatchStatSnapshot latestMatch = matchStatsStore.loadLatest();
+        if (latestMatch != null) {
+            lines.add(
+                "[HuntCore] Last match: "
+                    + latestMatch.winner()
+                    + " won in "
+                    + formatDuration(latestMatch.durationMillis())
+                    + " | runner "
+                    + latestMatch.runnerName()
+                    + " | POI "
+                    + latestMatch.poiName()
+                    + "."
+            );
+        }
+
+        return lines;
+    }
+
+    public List<String> getMatchHistoryLines(int limit) {
+        List<MatchStatsStore.MatchStatSnapshot> history = matchStatsStore.load();
+        if (history.isEmpty()) {
+            return List.of("[HuntCore] No match history has been recorded yet.");
+        }
+
+        int clampedLimit = Math.max(1, Math.min(limit, Math.min(10, history.size())));
+        List<String> lines = new ArrayList<>();
+        lines.add("[HuntCore] Recent match stats:");
+        for (int index = 0; index < clampedLimit; index++) {
+            MatchStatsStore.MatchStatSnapshot snapshot = history.get(index);
+            lines.add(
+                "[HuntCore] #"
+                    + (index + 1)
+                    + " "
+                    + snapshot.winner()
+                    + " won in "
+                    + formatDuration(snapshot.durationMillis())
+                    + " | runner "
+                    + snapshot.runnerName()
+                    + " | hunters "
+                    + snapshot.hunterCount()
+                    + " | POI "
+                    + snapshot.poiName()
+                    + " ("
+                    + snapshot.poiDistanceBlocks()
+                    + " blocks)"
+            );
+            lines.add("[HuntCore] Reason: " + snapshot.reason());
+            lines.add("[HuntCore] Kills: " + formatRecordedKills(snapshot.playerKills()));
+        }
+
+        return lines;
     }
 
     public boolean isHunterFrozen(Player player) {
@@ -175,21 +316,217 @@ public final class GameManager {
     }
 
     public void handleLobbyStateChange() {
-        if (!isLobbyEditable()) {
+        if (gameState == GameState.PAUSED || gameState == GameState.ENDING) {
             return;
         }
 
-        String blocker = getStartBlocker();
-        if (blocker == null) {
-            if (gameState == GameState.LOBBY) {
-                startMatchCountdown();
+        if (!hasOnlinePlayers()) {
+            cancelMatchPreparation();
+
+            if (gameState == GameState.COUNTDOWN) {
+                cancelMatchCountdown("No players are online to keep the lobby active.", true);
             }
             return;
         }
 
-        if (gameState == GameState.COUNTDOWN) {
-            cancelMatchCountdown(blocker);
+        String startBlocker = getStartBlocker();
+        if (hasPreparedMatches()) {
+            if (startBlocker == null) {
+                if (gameState == GameState.LOBBY) {
+                    startMatchCountdown();
+                }
+            } else if (gameState == GameState.COUNTDOWN) {
+                cancelMatchCountdown(startBlocker, true);
+            }
+
+            if (activePreparationId == null && shouldStartPreparationNow()) {
+                startMatchPreparation();
+            }
+            return;
         }
+
+        if (gameState == GameState.COUNTDOWN && startBlocker != null) {
+            cancelMatchCountdown(startBlocker, true);
+        }
+
+        if (activePreparationId == null && shouldStartPreparationNow()) {
+            startMatchPreparation();
+        }
+    }
+
+    private void startMatchPreparation() {
+        if (!shouldScoutPreparedMatch() || activePreparationId != null || !hasPreparedMatchCapacity()) {
+            return;
+        }
+        preparationAttempts++;
+
+        MatchWorldSet matchWorldSet = matchWorldService.createFreshWorldSet();
+        World matchWorld = matchWorldService.getOverworld(matchWorldSet);
+        List<Location> spawnCandidates = matchSpawnService.findSafeSpawnCandidates(matchWorld, MATCH_SPAWN_CANDIDATE_LIMIT);
+        SpawnSelection selectedSpawn = selectMatchSpawn(spawnCandidates);
+        if (selectedSpawn.spawn() == null) {
+            matchWorldService.cleanup(matchWorldSet);
+            Bukkit.broadcastMessage("[HuntCore] Match preparation failed because no safe spawn was found.");
+            return;
+        }
+
+        MatchPreparation preparation = new MatchPreparation(
+            matchWorldSet,
+            selectedSpawn.spawn(),
+            selectedSpawn.structureHint()
+        );
+        UUID preparationId = UUID.randomUUID();
+        activePreparationId = preparationId;
+        if (preparationAttempts == 1) {
+            Bukkit.broadcastMessage("[HuntCore] Scouting the next match world...");
+        } else if (preparationAttempts <= 3 || preparationAttempts % 3 == 0) {
+            Bukkit.broadcastMessage("[HuntCore] Still scouting for a strong nearby POI...");
+        }
+
+        scoutPreparationChunks(preparationId, preparation, 0);
+    }
+
+    private void scoutPreparationChunks(UUID preparationId, MatchPreparation preparation, int radiusIndex) {
+        if (activePreparationId == null || !activePreparationId.equals(preparationId)) {
+            return;
+        }
+
+        World matchWorld = matchWorldService.getOverworld(preparation.matchWorldSet());
+        if (matchWorld == null) {
+            activePreparationId = null;
+            matchWorldService.cleanup(preparation.matchWorldSet());
+            return;
+        }
+
+        int chunkRadius = PRECOMPUTE_CHUNK_RADII[Math.min(radiusIndex, PRECOMPUTE_CHUNK_RADII.length - 1)];
+        List<ChunkCoordinate> chunkWindow = buildPrecomputeChunkWindow(preparation.matchSpawn(), chunkRadius);
+        preloadPreparedChunks(matchWorld, chunkWindow).whenComplete((ignored, throwable) ->
+            Bukkit.getScheduler().runTask(plugin, () ->
+                finalizeMatchPreparation(preparationId, preparation, radiusIndex, chunkWindow, throwable)
+            )
+        );
+    }
+
+    private void finalizeMatchPreparation(
+        UUID preparationId,
+        MatchPreparation preparation,
+        int radiusIndex,
+        List<ChunkCoordinate> chunkWindow,
+        Throwable throwable
+    ) {
+        if (activePreparationId == null || !activePreparationId.equals(preparationId)) {
+            matchWorldService.cleanup(preparation.matchWorldSet());
+            return;
+        }
+
+        if (throwable != null) {
+            activePreparationId = null;
+            matchWorldService.cleanup(preparation.matchWorldSet());
+            Bukkit.broadcastMessage("[HuntCore] Match preparation failed. Try /ready again.");
+            return;
+        }
+
+        if (!shouldScoutPreparedMatch()) {
+            activePreparationId = null;
+            matchWorldService.cleanup(preparation.matchWorldSet());
+            return;
+        }
+
+        StructureHint preparedHint = structureHintService.findNearestStructureHint(
+            preparation.matchSpawn(),
+            collectLoadedChunks(preparation.matchWorldSet(), chunkWindow),
+            getDiscouragedPoiTypes()
+        ).orElse(null);
+
+        if (preparedHint != null && shouldAcceptPreparedHint(preparedHint)) {
+            activePreparationId = null;
+            preparedMatches.add(new MatchPreparation(
+                preparation.matchWorldSet(),
+                preparation.matchSpawn(),
+                preparedHint
+            ));
+            preparationAttempts = 0;
+            persistPreparedMatches();
+            announcePreparedMatchStatus();
+
+            if (gameState == GameState.LOBBY && getStartBlocker() == null) {
+                startMatchCountdown();
+            } else if (shouldStartPreparationNow()) {
+                Bukkit.getScheduler().runTask(plugin, this::startMatchPreparation);
+            }
+            return;
+        }
+
+        if (radiusIndex + 1 < PRECOMPUTE_CHUNK_RADII.length) {
+            scoutPreparationChunks(preparationId, preparation, radiusIndex + 1);
+            return;
+        }
+
+        activePreparationId = null;
+        matchWorldService.cleanup(preparation.matchWorldSet());
+        if (shouldScoutPreparedMatch() && gameState == GameState.LOBBY) {
+            Bukkit.getScheduler().runTask(plugin, this::startMatchPreparation);
+        }
+    }
+
+    private CompletableFuture<Void> preloadPreparedChunks(World world, List<ChunkCoordinate> chunkWindow) {
+        List<CompletableFuture<Chunk>> futures = new ArrayList<>();
+        for (ChunkCoordinate chunkCoordinate : chunkWindow) {
+            futures.add(world.getChunkAtAsync(chunkCoordinate.x(), chunkCoordinate.z(), true));
+        }
+
+        return CompletableFuture.allOf(futures.toArray(CompletableFuture[]::new));
+    }
+
+    private List<ChunkCoordinate> buildPrecomputeChunkWindow(Location center, int chunkRadius) {
+        int centerChunkX = center.getBlockX() >> 4;
+        int centerChunkZ = center.getBlockZ() >> 4;
+        List<ChunkCoordinate> chunkWindow = new ArrayList<>();
+        for (int offsetX = -chunkRadius; offsetX <= chunkRadius; offsetX++) {
+            for (int offsetZ = -chunkRadius; offsetZ <= chunkRadius; offsetZ++) {
+                if ((offsetX * offsetX) + (offsetZ * offsetZ) > chunkRadius * chunkRadius) {
+                    continue;
+                }
+
+                chunkWindow.add(new ChunkCoordinate(centerChunkX + offsetX, centerChunkZ + offsetZ));
+            }
+        }
+
+        return chunkWindow;
+    }
+
+    private List<Chunk> collectLoadedChunks(MatchWorldSet worldSet, List<ChunkCoordinate> chunkWindow) {
+        World overworld = matchWorldService.getOverworld(worldSet);
+        List<Chunk> chunks = new ArrayList<>();
+        if (overworld == null) {
+            return chunks;
+        }
+
+        for (ChunkCoordinate chunkCoordinate : chunkWindow) {
+            if (overworld.isChunkLoaded(chunkCoordinate.x(), chunkCoordinate.z())) {
+                chunks.add(overworld.getChunkAt(chunkCoordinate.x(), chunkCoordinate.z(), false));
+            }
+        }
+
+        return chunks;
+    }
+
+    private void cancelMatchPreparation() {
+        activePreparationId = null;
+        preparationAttempts = 0;
+    }
+
+    private void discardPreparedMatches() {
+        if (preparedMatches.isEmpty()) {
+            preparedMatchStore.delete();
+            return;
+        }
+
+        for (MatchPreparation preparedMatch : List.copyOf(preparedMatches)) {
+            matchWorldService.cleanup(preparedMatch.matchWorldSet());
+        }
+        preparedMatches.clear();
+        preparedMatchStore.delete();
     }
 
     public void handleRunnerDeath(Player runner) {
@@ -228,7 +565,7 @@ public final class GameManager {
 
         Location destination = switch (cause) {
             case NETHER_PORTAL -> getNetherPortalDestination(fromLocation);
-            case END_PORTAL -> getEndPortalDestination(fromLocation);
+            case END_PORTAL -> getEndPortalDestination(player, fromLocation);
             default -> null;
         };
 
@@ -263,11 +600,31 @@ public final class GameManager {
     }
 
     public boolean shouldKeepPlayerRegisteredOnQuit(UUID playerId) {
-        return currentMatch != null && currentMatch.involves(playerId) && (isLiveMatchState() || gameState == GameState.PAUSED);
+        if (currentMatch == null) {
+            return false;
+        }
+
+        if (currentMatch.involves(playerId) && (isLiveMatchState() || gameState == GameState.PAUSED)) {
+            return true;
+        }
+
+        return isSpectator(playerId) && (isLiveMatchState() || gameState == GameState.PAUSED);
     }
 
     public boolean handlePlayerJoin(Player player) {
-        if (currentMatch == null || !currentMatch.involves(player.getUniqueId()) || (!isLiveMatchState() && gameState != GameState.PAUSED)) {
+        if (currentMatch == null || (!isLiveMatchState() && gameState != GameState.PAUSED)) {
+            return false;
+        }
+
+        if (isSpectator(player.getUniqueId())) {
+            sendPlayerToSpectatorView(player, false);
+            player.sendMessage(gameState == GameState.PAUSED
+                ? "[HuntCore] You rejoined as a spectator while the match is paused."
+                : "[HuntCore] You rejoined as a spectator.");
+            return true;
+        }
+
+        if (!currentMatch.involves(player.getUniqueId())) {
             return false;
         }
 
@@ -383,15 +740,19 @@ public final class GameManager {
 
     public void shutdown() {
         matchCountdown.cancel();
+        cancelMatchPreparation();
         cancelTask(headStartTask);
         cancelTask(endTask);
         cancelTask(runnerDisconnectTask);
         cancelTask(huntersDisconnectTask);
+        cancelTask(cacheMaintenanceTask);
         headStartTask = null;
         endTask = null;
         runnerDisconnectTask = null;
         huntersDisconnectTask = null;
+        cacheMaintenanceTask = null;
         compassTracker.stop();
+        persistPreparedMatches();
         if (hasPausedMatch()) {
             persistPausedMatch();
             matchWorldService.saveWorldSet(currentMatch.getMatchWorldSet());
@@ -451,6 +812,60 @@ public final class GameManager {
             gameState = GameState.LOBBY;
             pausedResumeState = GameState.IN_GAME;
             headStartSecondsRemaining = 0;
+        }
+    }
+
+    public void restorePreparedMatchesIfPresent() {
+        List<PreparedMatchStore.PreparedMatchSnapshot> snapshots = preparedMatchStore.load();
+        if (snapshots.isEmpty()) {
+            return;
+        }
+
+        boolean restoredAny = false;
+        for (PreparedMatchStore.PreparedMatchSnapshot snapshot : snapshots) {
+            if (!hasPreparedMatchCapacity()) {
+                matchWorldService.cleanup(snapshot.matchWorldSet());
+                continue;
+            }
+
+            try {
+                matchWorldService.loadExistingWorldSet(snapshot.matchWorldSet());
+                Location matchSpawn = toLocation(snapshot.matchSpawn());
+                Location hintLocation = toLocation(snapshot.structureHint().location());
+                if (matchSpawn == null || hintLocation == null) {
+                    throw new IllegalStateException("Prepared match metadata had an invalid location.");
+                }
+
+                preparedMatches.add(
+                    new MatchPreparation(
+                        snapshot.matchWorldSet(),
+                        matchSpawn,
+                        new StructureHint(
+                            snapshot.structureHint().landmarkName(),
+                            hintLocation,
+                            snapshot.structureHint().roughDirection(),
+                            snapshot.structureHint().approximateDistanceBlocks(),
+                            snapshot.structureHint().targetYawDegrees()
+                        )
+                    )
+                );
+                restoredAny = true;
+                if (!hasPreparedMatchCapacity()) {
+                    break;
+                }
+            } catch (RuntimeException exception) {
+                matchWorldService.cleanup(snapshot.matchWorldSet());
+                plugin.getLogger().warning(
+                    "Discarded a cached prepared match that could not be restored: " + exception.getMessage()
+                );
+            }
+        }
+
+        if (restoredAny) {
+            persistPreparedMatches();
+            plugin.getLogger().info("Restored " + preparedMatches.size() + " cached HuntCore match world(s).");
+        } else {
+            preparedMatchStore.delete();
         }
     }
 
@@ -551,8 +966,15 @@ public final class GameManager {
     }
 
     private void cancelMatchCountdown(String reason) {
+        cancelMatchCountdown(reason, false);
+    }
+
+    private void cancelMatchCountdown(String reason, boolean preservePreparedMatch) {
         matchCountdown.cancel();
         gameState = GameState.LOBBY;
+        if (!preservePreparedMatch) {
+            discardPreparedMatches();
+        }
         Bukkit.broadcastMessage("[HuntCore] Match countdown cancelled: " + reason);
     }
 
@@ -565,23 +987,21 @@ public final class GameManager {
         if (runners.size() != 1 || hunters.isEmpty()) {
             gameState = GameState.LOBBY;
             Bukkit.broadcastMessage("[HuntCore] Match start failed because the teams changed.");
+            handleLobbyStateChange();
             return;
         }
 
         Player runner = runners.get(0);
-        MatchWorldSet matchWorldSet = matchWorldService.createFreshWorldSet();
-        World matchWorld = matchWorldService.getOverworld(matchWorldSet);
-
-        Location matchSpawn = matchSpawnService.findSafeSpawn(matchWorld).orElse(null);
-        if (matchSpawn == null) {
-            matchWorldService.cleanup(matchWorldSet);
+        MatchPreparation preparation = consumePreparedMatch();
+        if (preparation == null) {
             gameState = GameState.LOBBY;
-            Bukkit.broadcastMessage("[HuntCore] Match start failed because no safe spawn was found.");
+            Bukkit.broadcastMessage("[HuntCore] Match start failed because the prepared world was no longer valid.");
+            handleLobbyStateChange();
             return;
         }
+        announcePreparedMatchStatus();
 
         // TODO HuntCore v2: support multiple runners and shared hunter target rules.
-        StructureHint structureHint = structureHintService.findNearestHint(matchSpawn).orElse(null);
         clearPausedMatchPersistence();
         compassTracker.resetTrackingState();
         pausedResumeState = GameState.IN_GAME;
@@ -589,20 +1009,20 @@ public final class GameManager {
         currentMatch = new MatchContext(
             runner.getUniqueId(),
             hunters.stream().map(Player::getUniqueId).toList(),
-            matchSpawn,
-            structureHint,
-            matchWorldSet
+            preparation.matchSpawn(),
+            preparation.structureHint(),
+            preparation.matchWorldSet()
         );
 
         preparePlayerForMatch(runner);
-        runner.teleport(matchSpawn);
-        currentMatch.rememberParticipantLocation(runner.getUniqueId(), matchSpawn);
+        teleportSafetyService.teleport(runner, preparation.matchSpawn(), false, false);
+        currentMatch.rememberParticipantLocation(runner.getUniqueId(), preparation.matchSpawn());
 
         for (int index = 0; index < hunters.size(); index++) {
             Player hunter = hunters.get(index);
-            Location hunterSpawn = spreadHunterSpawn(matchSpawn, index);
+            Location hunterSpawn = spreadHunterSpawn(preparation.matchSpawn(), index);
             preparePlayerForMatch(hunter);
-            hunter.teleport(hunterSpawn);
+            teleportSafetyService.teleport(hunter, hunterSpawn, false, false);
             currentMatch.rememberParticipantLocation(hunter.getUniqueId(), hunterSpawn);
         }
 
@@ -616,14 +1036,16 @@ public final class GameManager {
             sendPlayerToSpectatorView(spectator, false);
         }
 
-        if (structureHint != null) {
-            runner.getInventory().addItem(structureHintService.createHintBook(structureHint));
+        if (preparation.structureHint() != null) {
+            runner.getInventory().addItem(structureHintService.createHintBook(preparation.structureHint()));
             runner.sendMessage("[HuntCore] A scout note has been added to your inventory.");
         } else {
             runner.sendMessage("[HuntCore] No nearby structure hint was found for this round.");
         }
 
         Bukkit.broadcastMessage("[HuntCore] Match started. " + runner.getName() + " is the runner.");
+        rememberRecentPoiType(preparation.structureHint().displayName());
+        handleLobbyStateChange();
         startHeadStart(runner);
     }
 
@@ -709,9 +1131,11 @@ public final class GameManager {
         headStartSecondsRemaining = 0;
 
         String winnerText = winner == MatchWinner.RUNNER ? "Runner" : "Hunters";
-        String durationText = formatDuration(System.currentTimeMillis() - finishedMatch.getStartedAtMillis());
+        long durationMillis = System.currentTimeMillis() - finishedMatch.getStartedAtMillis();
+        String durationText = formatDuration(durationMillis);
         Bukkit.broadcastMessage("[HuntCore] " + winnerText + " win! " + reason + " Duration: " + durationText + ".");
         showMatchSummary(winnerText, reason, durationText);
+        recordMatchStats(finishedMatch, winnerText, reason, durationMillis);
 
         // TODO HuntCore v2: expand the end summary into a reusable match recap object when stats are added.
         cancelTask(endTask);
@@ -735,6 +1159,7 @@ public final class GameManager {
         headStartSecondsRemaining = 0;
         cleanupActiveMatchWorlds();
         Bukkit.broadcastMessage("[HuntCore] Returned to the lobby. Choose /runner, /hunter, or /spectate.");
+        handleLobbyStateChange();
     }
 
     private String getStartBlocker() {
@@ -764,6 +1189,228 @@ public final class GameManager {
         }
 
         return null;
+    }
+
+    private boolean shouldAcceptPreparedHint(StructureHint structureHint) {
+        if (structureHint == null) {
+            return false;
+        }
+
+        int distance = structureHint.approximateDistanceBlocks();
+        if (distance <= IDEAL_POI_DISTANCE_BLOCKS) {
+            return true;
+        }
+
+        if (preparationAttempts >= 2 && distance <= GOOD_POI_DISTANCE_BLOCKS) {
+            return true;
+        }
+
+        if (preparationAttempts >= 3 && distance <= ACCEPTABLE_POI_DISTANCE_BLOCKS) {
+            return true;
+        }
+
+        return preparationAttempts >= 4 && distance <= MAX_POI_DISTANCE_BLOCKS;
+    }
+
+    private boolean shouldScoutPreparedMatch() {
+        return hasOnlinePlayers() && gameState == GameState.LOBBY;
+    }
+
+    private boolean hasOnlinePlayers() {
+        return !Bukkit.getOnlinePlayers().isEmpty();
+    }
+
+    public void startCacheMaintenance() {
+        cancelTask(cacheMaintenanceTask);
+        cacheMaintenanceTask = Bukkit.getScheduler().runTaskTimer(plugin, this::handleLobbyStateChange, 100L, CACHE_MAINTENANCE_INTERVAL_TICKS);
+    }
+
+    private boolean shouldStartPreparationNow() {
+        return activePreparationId == null && hasPreparedMatchCapacity() && gameState == GameState.LOBBY;
+    }
+
+    private String describeBackgroundScoutingStatus() {
+        if (activePreparationId != null) {
+            return "active";
+        }
+
+        if (!shouldScoutPreparedMatch()) {
+            return isLiveMatchState()
+                ? "disabled during live match"
+                : gameState == GameState.PAUSED || gameState == GameState.ENDING
+                ? "paused by match state"
+                : "idle";
+        }
+
+        if (!hasPreparedMatchCapacity()) {
+            return "cache full";
+        }
+
+        if (gameState == GameState.LOBBY) {
+            return "ready to scout";
+        }
+
+        return "idle";
+    }
+
+    private boolean hasPreparedMatches() {
+        return !preparedMatches.isEmpty();
+    }
+
+    private boolean hasPreparedMatchCapacity() {
+        return preparedMatches.size() < PREPARED_MATCH_CACHE_SIZE;
+    }
+
+    private MatchPreparation consumePreparedMatch() {
+        if (preparedMatches.isEmpty()) {
+            return null;
+        }
+
+        MatchPreparation preparation = selectBestPreparedMatch();
+        preparedMatches.remove(preparation);
+        persistPreparedMatches();
+        return preparation;
+    }
+
+    private void announcePreparedMatchStatus() {
+        if (Bukkit.getOnlinePlayers().isEmpty()) {
+            return;
+        }
+
+        Bukkit.broadcastMessage(
+            "[HuntCore] Prescouted worlds ready: " + preparedMatches.size() + "/" + PREPARED_MATCH_CACHE_SIZE + "."
+        );
+    }
+
+    private List<String> getDiscouragedPoiTypes() {
+        List<String> discouragedTypes = new ArrayList<>();
+        for (MatchPreparation preparedMatch : preparedMatches) {
+            discouragedTypes.add(preparedMatch.structureHint().displayName());
+        }
+        discouragedTypes.addAll(recentPoiHistory);
+        return discouragedTypes;
+    }
+
+    private void rememberRecentPoiType(String poiType) {
+        if (poiType == null || poiType.isBlank()) {
+            return;
+        }
+
+        recentPoiHistory.addFirst(poiType);
+        while (recentPoiHistory.size() > RECENT_POI_HISTORY_LIMIT) {
+            recentPoiHistory.removeLast();
+        }
+    }
+
+    private MatchPreparation selectBestPreparedMatch() {
+        if (preparedMatches.isEmpty()) {
+            return null;
+        }
+
+        List<String> discouragedPoiTypes = new ArrayList<>(recentPoiHistory);
+        MatchPreparation bestPreparation = null;
+        double bestScore = Double.MAX_VALUE;
+        for (MatchPreparation preparedMatch : preparedMatches) {
+            double score = structureHintService.scorePreparedStructureHint(preparedMatch.structureHint(), discouragedPoiTypes);
+            if (score < bestScore) {
+                bestScore = score;
+                bestPreparation = preparedMatch;
+            }
+        }
+
+        return bestPreparation == null ? preparedMatches.get(0) : bestPreparation;
+    }
+
+    private void recordMatchStats(MatchContext finishedMatch, String winnerText, String reason, long durationMillis) {
+        try {
+            StructureHint structureHint = finishedMatch.getStructureHint();
+            matchStatsStore.append(
+                new MatchStatsStore.MatchStatSnapshot(
+                    System.currentTimeMillis(),
+                    durationMillis,
+                    winnerText,
+                    reason,
+                    resolvePlayerName(finishedMatch.getRunnerId()),
+                    finishedMatch.getHunterIds().size(),
+                    structureHint == null ? "none" : structureHint.displayName(),
+                    structureHint == null ? 0 : structureHint.approximateDistanceBlocks(),
+                    finishedMatch.getMatchWorldSet().getBaseName(),
+                    buildRecordedKillMap(finishedMatch)
+                )
+            );
+        } catch (java.io.IOException exception) {
+            plugin.getLogger().warning("Failed to record match stats: " + exception.getMessage());
+        }
+    }
+
+    private String resolvePlayerName(UUID playerId) {
+        Player onlinePlayer = Bukkit.getPlayer(playerId);
+        if (onlinePlayer != null) {
+            return onlinePlayer.getName();
+        }
+
+        org.bukkit.OfflinePlayer offlinePlayer = Bukkit.getOfflinePlayer(playerId);
+        return offlinePlayer.getName() == null ? playerId.toString() : offlinePlayer.getName();
+    }
+
+    private String formatState(GameState state) {
+        return state.name().toLowerCase(Locale.ROOT).replace('_', ' ');
+    }
+
+    private java.util.Map<String, Integer> buildRecordedKillMap(MatchContext finishedMatch) {
+        java.util.Map<String, Integer> kills = new java.util.LinkedHashMap<>();
+
+        String runnerName = resolvePlayerName(finishedMatch.getRunnerId());
+        kills.put(runnerName, finishedMatch.getKillCount(finishedMatch.getRunnerId()));
+
+        for (UUID hunterId : finishedMatch.getHunterIds()) {
+            kills.put(resolvePlayerName(hunterId), finishedMatch.getKillCount(hunterId));
+        }
+
+        return kills;
+    }
+
+    private String formatRecordedKills(java.util.Map<String, Integer> playerKills) {
+        if (playerKills == null || playerKills.isEmpty()) {
+            return "none";
+        }
+
+        List<String> parts = new ArrayList<>();
+        for (var entry : playerKills.entrySet()) {
+            parts.add(entry.getKey() + " " + entry.getValue());
+        }
+        return String.join(", ", parts);
+    }
+
+    private void persistPreparedMatches() {
+        if (preparedMatches.isEmpty()) {
+            preparedMatchStore.delete();
+            return;
+        }
+
+        try {
+            for (MatchPreparation preparedMatch : preparedMatches) {
+                matchWorldService.saveWorldSet(preparedMatch.matchWorldSet());
+            }
+
+            List<PreparedMatchStore.PreparedMatchSnapshot> snapshots = new ArrayList<>();
+            for (MatchPreparation preparedMatch : preparedMatches) {
+                snapshots.add(
+                    new PreparedMatchStore.PreparedMatchSnapshot(
+                        preparedMatch.matchWorldSet(),
+                        toStoredLocation(preparedMatch.matchSpawn()),
+                        PreparedMatchStore.StructureHintSnapshot.fromStructureHint(
+                            preparedMatch.structureHint(),
+                            toStoredLocation(preparedMatch.structureHint().location())
+                        )
+                    )
+                );
+            }
+
+            preparedMatchStore.save(snapshots);
+        } catch (java.io.IOException exception) {
+            plugin.getLogger().warning("Failed to save cached prepared matches: " + exception.getMessage());
+        }
     }
 
     private boolean hasAnyActiveHunters(UUID excludedHunterId) {
@@ -899,6 +1546,7 @@ public final class GameManager {
         }
 
         compassTracker.giveHunterCompass(player);
+        teleportSafetyService.stabilize(player, false, false);
         if (gameState == GameState.HEAD_START) {
             player.sendMessage("[HuntCore] You respawned early. Wait for the hunter release.");
             return;
@@ -919,7 +1567,7 @@ public final class GameManager {
         player.setAllowFlight(false);
         player.setFlying(false);
         if (targetLocation != null) {
-            player.teleport(targetLocation);
+            teleportSafetyService.teleport(player, targetLocation, false, false);
             rememberParticipantLocation(player, targetLocation);
         }
     }
@@ -931,7 +1579,7 @@ public final class GameManager {
         player.setFlying(false);
         compassTracker.giveHunterCompass(player);
         if (targetLocation != null) {
-            player.teleport(targetLocation);
+            teleportSafetyService.teleport(player, targetLocation, false, false);
             rememberParticipantLocation(player, targetLocation);
         }
 
@@ -963,7 +1611,7 @@ public final class GameManager {
         return null;
     }
 
-    private Location getEndPortalDestination(Location fromLocation) {
+    private Location getEndPortalDestination(Player player, Location fromLocation) {
         if (currentMatch == null) {
             return null;
         }
@@ -975,10 +1623,11 @@ public final class GameManager {
 
         if (fromWorld.getEnvironment() == World.Environment.NORMAL) {
             World end = matchWorldService.getEnd(currentMatch.getMatchWorldSet());
-            return end == null ? null : end.getSpawnLocation();
+            return getEndPlatformLocation(end, fromLocation);
         }
 
         if (fromWorld.getEnvironment() == World.Environment.THE_END) {
+            lobbyService.clearDragonBossBars(player);
             World overworld = matchWorldService.getOverworld(currentMatch.getMatchWorldSet());
             return overworld == null ? null : overworld.getSpawnLocation();
         }
@@ -1061,6 +1710,37 @@ public final class GameManager {
         return matchSpawnService.findSafeSpawnNear(targetWorld, targetX, targetZ, 8).orElse(targetWorld.getSpawnLocation());
     }
 
+    private Location getEndPlatformLocation(World endWorld, Location fromLocation) {
+        if (endWorld == null) {
+            return null;
+        }
+
+        ensureEndPlatform(endWorld);
+        float yaw = fromLocation == null ? 0.0f : fromLocation.getYaw();
+        float pitch = fromLocation == null ? 0.0f : fromLocation.getPitch();
+        return new Location(endWorld, END_PLATFORM_CENTER_X + 0.5, END_PLATFORM_Y + 1.0, END_PLATFORM_CENTER_Z + 0.5, yaw, pitch);
+    }
+
+    private void ensureEndPlatform(World endWorld) {
+        for (int x = END_PLATFORM_CENTER_X - 2; x <= END_PLATFORM_CENTER_X + 2; x++) {
+            for (int z = END_PLATFORM_CENTER_Z - 2; z <= END_PLATFORM_CENTER_Z + 2; z++) {
+                endWorld.getBlockAt(x, END_PLATFORM_Y, z).setType(Material.OBSIDIAN, false);
+                for (int y = END_PLATFORM_Y + 1; y <= END_PLATFORM_Y + 4; y++) {
+                    endWorld.getBlockAt(x, y, z).setType(Material.AIR, false);
+                }
+            }
+        }
+    }
+
+    private SpawnSelection selectMatchSpawn(List<Location> spawnCandidates) {
+        if (spawnCandidates.isEmpty()) {
+            return new SpawnSelection(null, null);
+        }
+
+        Location selectedSpawn = spawnCandidates.get(0);
+        return new SpawnSelection(selectedSpawn, null);
+    }
+
     private void cleanupActiveMatchWorlds() {
         if (currentMatch == null) {
             return;
@@ -1097,7 +1777,7 @@ public final class GameManager {
 
         Player runner = Bukkit.getPlayer(currentMatch.getRunnerId());
         Location target = runner != null && runner.isOnline() ? runner.getLocation() : currentMatch.getMatchSpawn();
-        player.teleport(target);
+        teleportSafetyService.teleport(player, target, true, true);
 
         if (notify) {
             player.sendMessage("[HuntCore] You are now spectating. Use /spectate again to leave spectator mode.");
@@ -1247,13 +1927,33 @@ public final class GameManager {
         }
 
         double angle = Math.toRadians(hunterIndex * 45.0);
-        double radius = 2.0;
-        return baseSpawn.clone().add(Math.cos(angle) * radius, 0.0, Math.sin(angle) * radius);
+        double radius = 4.0;
+        double targetX = baseSpawn.getX() + Math.cos(angle) * radius;
+        double targetZ = baseSpawn.getZ() + Math.sin(angle) * radius;
+        World world = baseSpawn.getWorld();
+        if (world == null) {
+            return baseSpawn.clone();
+        }
+
+        return matchSpawnService.findSafeSpawnNear(world, targetX, targetZ, 6).orElse(baseSpawn.clone());
     }
 
     private void cancelTask(BukkitTask task) {
         if (task != null) {
             task.cancel();
         }
+    }
+
+    private record SpawnSelection(Location spawn, StructureHint structureHint) {
+    }
+
+    private record MatchPreparation(
+        MatchWorldSet matchWorldSet,
+        Location matchSpawn,
+        StructureHint structureHint
+    ) {
+    }
+
+    private record ChunkCoordinate(int x, int z) {
     }
 }

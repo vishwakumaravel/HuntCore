@@ -57,6 +57,12 @@ commands:
     description: Import a world zip and use it as the PvP arena.
     usage: /installpvpmap [zip-path] [world-name]
     permission: huntcore.admin
+  huntstatus:
+    description: Show HuntCore lobby, cache, and match status.
+    usage: /huntstatus
+  matchstats:
+    description: Show recent HuntCore match results.
+    usage: /matchstats [1-10]
 permissions:
   huntcore.admin:
     description: Allows changing HuntCore match settings in game.

@@ -5,6 +5,7 @@ import com.huntcore.game.GameManager;
 import com.huntcore.game.LobbyService;
 import com.huntcore.game.PlayerRegistry;
 import com.huntcore.game.PlayerRole;
+import com.huntcore.game.TeleportSafetyService;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
@@ -21,22 +22,28 @@ import org.bukkit.potion.PotionEffect;
 
 public final class PvpArenaManager {
 
+    private static final int PVP_STARTING_FOOD_LEVEL = 12;
+    private static final float PVP_STARTING_SATURATION = 0.0f;
+
     private final PluginConfig pluginConfig;
     private final PlayerRegistry playerRegistry;
     private final LobbyService lobbyService;
     private final GameManager gameManager;
+    private final TeleportSafetyService teleportSafetyService;
     private final Map<UUID, PvpSession> sessions = new HashMap<>();
 
     public PvpArenaManager(
         PluginConfig pluginConfig,
         PlayerRegistry playerRegistry,
         LobbyService lobbyService,
-        GameManager gameManager
+        GameManager gameManager,
+        TeleportSafetyService teleportSafetyService
     ) {
         this.pluginConfig = pluginConfig;
         this.playerRegistry = playerRegistry;
         this.lobbyService = lobbyService;
         this.gameManager = gameManager;
+        this.teleportSafetyService = teleportSafetyService;
     }
 
     public boolean isPvpParticipant(UUID playerId) {
@@ -68,7 +75,7 @@ public final class PvpArenaManager {
         gameManager.handleLobbyStateChange();
 
         prepareForPvp(player);
-        player.teleport(pvpSpawn);
+        teleportSafetyService.teleport(player, pvpSpawn, false, false);
         player.sendMessage("[HuntCore] Entered the PvP arena. Use /pvpleave to return.");
         return true;
     }
@@ -108,7 +115,7 @@ public final class PvpArenaManager {
         }
 
         prepareForPvp(player);
-        player.teleport(pvpSpawn);
+        teleportSafetyService.teleport(player, pvpSpawn, false, false);
         player.sendMessage("[HuntCore] You rejoined the PvP arena.");
         return true;
     }
@@ -141,6 +148,7 @@ public final class PvpArenaManager {
         }
 
         prepareForPvp(player);
+        teleportSafetyService.stabilize(player, false, false);
     }
 
     public void shutdown() {
@@ -187,7 +195,7 @@ public final class PvpArenaManager {
         player.setSaturation(session.saturation());
         player.setLevel(session.level());
         player.setExp(session.expProgress());
-        player.teleport(targetLocation);
+        teleportSafetyService.teleport(player, targetLocation, session.allowFlight(), session.flying());
     }
 
     private void prepareForPvp(Player player) {
@@ -207,8 +215,8 @@ public final class PvpArenaManager {
             player.setHealth(maxHealth.getValue());
         }
 
-        player.setFoodLevel(20);
-        player.setSaturation(20.0f);
+        player.setFoodLevel(PVP_STARTING_FOOD_LEVEL);
+        player.setSaturation(PVP_STARTING_SATURATION);
         equipKit(player.getInventory());
     }
 
@@ -219,12 +227,14 @@ public final class PvpArenaManager {
         inventory.setBoots(new ItemStack(Material.DIAMOND_BOOTS));
         inventory.setItem(0, new ItemStack(Material.DIAMOND_SWORD));
         inventory.setItem(1, new ItemStack(Material.DIAMOND_AXE));
+        inventory.setItem(3, new ItemStack(Material.COOKED_BEEF, 6));
 
         ItemStack crossbow = new ItemStack(Material.CROSSBOW);
         CrossbowMeta crossbowMeta = (CrossbowMeta) crossbow.getItemMeta();
         crossbow.setItemMeta(crossbowMeta);
         inventory.setItem(2, crossbow);
         inventory.setItem(8, new ItemStack(Material.ARROW, 8));
+        inventory.setItemInOffHand(new ItemStack(Material.SHIELD));
         inventory.setHeldItemSlot(0);
     }
 

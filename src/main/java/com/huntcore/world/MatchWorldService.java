@@ -8,6 +8,8 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.SimpleFileVisitor;
 import java.nio.file.attribute.BasicFileAttributes;
+import java.util.HashSet;
+import java.util.Set;
 import java.util.concurrent.ThreadLocalRandom;
 import org.bukkit.Bukkit;
 import org.bukkit.World;
@@ -83,10 +85,46 @@ public final class MatchWorldService {
         saveWorld(worldSet.getEndName());
     }
 
+    public void cleanupOrphanedMatchWorlds(Set<String> preservedBaseNames) {
+        Path worldContainer = plugin.getServer().getWorldContainer().toPath();
+        String prefix = pluginConfig.getMatchWorldPrefix().replaceAll("[^A-Za-z0-9_\\-]", "_") + "_";
+        Set<String> preserved = preservedBaseNames == null ? Set.of() : preservedBaseNames;
+        Set<String> discoveredBaseNames = new HashSet<>();
+
+        try (var paths = Files.list(worldContainer)) {
+            paths.filter(Files::isDirectory)
+                .map(path -> path.getFileName().toString())
+                .filter(name -> name.startsWith(prefix))
+                .map(this::toBaseWorldName)
+                .filter(baseName -> !baseName.isBlank())
+                .filter(baseName -> !preserved.contains(baseName))
+                .forEach(discoveredBaseNames::add);
+        } catch (IOException exception) {
+            plugin.getLogger().warning("Failed to scan for orphaned match worlds: " + exception.getMessage());
+            return;
+        }
+
+        for (String baseName : discoveredBaseNames) {
+            cleanup(new MatchWorldSet(baseName));
+        }
+    }
+
     private String buildBaseWorldName() {
         String prefix = pluginConfig.getMatchWorldPrefix().replaceAll("[^A-Za-z0-9_\\-]", "_");
         String suffix = Long.toHexString(ThreadLocalRandom.current().nextLong()).replace('-', '0');
         return prefix + "_" + suffix.substring(0, Math.min(suffix.length(), 10));
+    }
+
+    private String toBaseWorldName(String worldName) {
+        if (worldName.endsWith("_the_end")) {
+            return worldName.substring(0, worldName.length() - "_the_end".length());
+        }
+
+        if (worldName.endsWith("_nether")) {
+            return worldName.substring(0, worldName.length() - "_nether".length());
+        }
+
+        return worldName;
     }
 
     private World createWorld(String name, World.Environment environment, long seed) {

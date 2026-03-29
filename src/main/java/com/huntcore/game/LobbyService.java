@@ -1,8 +1,11 @@
 package com.huntcore.game;
 
 import com.huntcore.config.PluginConfig;
+import org.bukkit.Bukkit;
 import org.bukkit.GameMode;
 import org.bukkit.Location;
+import org.bukkit.World;
+import org.bukkit.boss.DragonBattle;
 import org.bukkit.attribute.Attribute;
 import org.bukkit.attribute.AttributeInstance;
 import org.bukkit.entity.Player;
@@ -10,15 +13,21 @@ import org.bukkit.potion.PotionEffect;
 
 public final class LobbyService {
 
-    private final PluginConfig pluginConfig;
+    private static final int LOBBY_FOOD_LEVEL = 16;
+    private static final float LOBBY_SATURATION = 0.0f;
 
-    public LobbyService(PluginConfig pluginConfig) {
+    private final PluginConfig pluginConfig;
+    private final TeleportSafetyService teleportSafetyService;
+
+    public LobbyService(PluginConfig pluginConfig, TeleportSafetyService teleportSafetyService) {
         this.pluginConfig = pluginConfig;
+        this.teleportSafetyService = teleportSafetyService;
     }
 
     public void sendToLobby(Player player, boolean clearInventory) {
         prepareForLobby(player, clearInventory);
-        player.teleport(pluginConfig.getLobbySpawn(player.getServer()));
+        clearDragonBossBars(player);
+        teleportSafetyService.teleport(player, pluginConfig.getLobbySpawn(player.getServer()), false, false);
     }
 
     public void prepareForLobby(Player player, boolean clearInventory) {
@@ -31,8 +40,8 @@ public final class LobbyService {
         if (maxHealth != null) {
             player.setHealth(maxHealth.getValue());
         }
-        player.setFoodLevel(20);
-        player.setSaturation(20.0f);
+        player.setFoodLevel(LOBBY_FOOD_LEVEL);
+        player.setSaturation(LOBBY_SATURATION);
         player.setFireTicks(0);
         player.setFallDistance(0.0f);
         player.setExp(0.0f);
@@ -48,5 +57,18 @@ public final class LobbyService {
 
     public Location getLobbySpawn(Player player) {
         return pluginConfig.getLobbySpawn(player.getServer());
+    }
+
+    public void clearDragonBossBars(Player player) {
+        for (World world : Bukkit.getWorlds()) {
+            if (world.getEnvironment() != World.Environment.THE_END) {
+                continue;
+            }
+
+            DragonBattle dragonBattle = world.getEnderDragonBattle();
+            if (dragonBattle != null) {
+                dragonBattle.getBossBar().removePlayer(player);
+            }
+        }
     }
 }

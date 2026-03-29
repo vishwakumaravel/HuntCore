@@ -1,24 +1,16 @@
 package com.huntcore.world;
 
 import org.bukkit.Location;
-import org.bukkit.StructureType;
 
-@SuppressWarnings("deprecation")
-public record StructureHint(StructureType structureType, Location location, String roughDirection) {
+public record StructureHint(
+    String landmarkName,
+    Location location,
+    String roughDirection,
+    int approximateDistanceBlocks,
+    int targetYawDegrees
+) {
 
     public String displayName() {
-        if (structureType == StructureType.VILLAGE) {
-            return "village";
-        }
-
-        if (structureType == StructureType.RUINED_PORTAL) {
-            return "ruined portal";
-        }
-
-        if (structureType == StructureType.PILLAGER_OUTPOST) {
-            return "pillager outpost";
-        }
-
-        return "structure";
+        return landmarkName == null || landmarkName.isBlank() ? "landmark" : landmarkName;
     }
 }

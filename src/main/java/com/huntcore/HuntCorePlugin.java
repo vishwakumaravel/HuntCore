@@ -1,8 +1,10 @@
 package com.huntcore;
 
 import com.huntcore.command.HunterKeepInventoryCommand;
+import com.huntcore.command.HuntStatusCommand;
 import com.huntcore.command.InstallLobbyMapCommand;
 import com.huntcore.command.InstallPvpMapCommand;
+import com.huntcore.command.MatchStatsCommand;
 import com.huntcore.command.PauseCommand;
 import com.huntcore.command.PvpCommand;
 import com.huntcore.command.PvpLeaveCommand;
@@ -17,9 +19,13 @@ import com.huntcore.config.PluginConfig;
 import com.huntcore.game.GameManager;
 import com.huntcore.game.LobbyService;
 import com.huntcore.game.MatchCountdown;
+import com.huntcore.game.MatchStatsStore;
 import com.huntcore.game.PausedMatchStore;
+import com.huntcore.game.PausedMatchStore.PausedMatchSnapshot;
+import com.huntcore.game.PreparedMatchStore;
 import com.huntcore.game.PlayerRegistry;
 import com.huntcore.game.PlayerRole;
+import com.huntcore.game.TeleportSafetyService;
 import com.huntcore.listener.HunterCompassListener;
 import com.huntcore.listener.MatchEventListener;
 import com.huntcore.listener.MatchPortalListener;
@@ -31,8 +37,11 @@ import com.huntcore.tracking.PortalTrackingService;
 import com.huntcore.world.LobbyMapInstaller;
 import com.huntcore.world.MatchSpawnService;
 import com.huntcore.world.MatchWorldService;
+import com.huntcore.world.MatchWorldSet;
 import com.huntcore.world.PvpMapInstaller;
 import com.huntcore.world.StructureHintService;
+import java.util.HashSet;
+import java.util.Set;
 import org.bukkit.Bukkit;
 import org.bukkit.command.CommandExecutor;
 import org.bukkit.command.PluginCommand;
@@ -48,6 +57,7 @@ public final class HuntCorePlugin extends JavaPlugin {
     private MatchWorldService matchWorldService;
     private StructureHintService structureHintService;
     private MatchCountdown matchCountdown;
+    private TeleportSafetyService teleportSafetyService;
     private PortalTrackingService portalTrackingService;
     private CompassTracker compassTracker;
     private GameManager gameManager;
@@ -55,6 +65,8 @@ public final class HuntCorePlugin extends JavaPlugin {
     private PvpMapInstaller pvpMapInstaller;
     private PvpArenaManager pvpArenaManager;
     private PausedMatchStore pausedMatchStore;
+    private PreparedMatchStore preparedMatchStore;
+    private MatchStatsStore matchStatsStore;
 
     @Override
     public void onEnable() {
@@ -62,7 +74,8 @@ public final class HuntCorePlugin extends JavaPlugin {
 
         this.pluginConfig = new PluginConfig(this);
         this.playerRegistry = new PlayerRegistry();
-        this.lobbyService = new LobbyService(pluginConfig);
+        this.teleportSafetyService = new TeleportSafetyService(this);
+        this.lobbyService = new LobbyService(pluginConfig, teleportSafetyService);
         this.matchSpawnService = new MatchSpawnService(pluginConfig);
         this.matchWorldService = new MatchWorldService(this, pluginConfig);
         this.structureHintService = new StructureHintService(pluginConfig);
@@ -72,6 +85,8 @@ public final class HuntCorePlugin extends JavaPlugin {
         this.lobbyMapInstaller = new LobbyMapInstaller(this, pluginConfig);
         this.pvpMapInstaller = new PvpMapInstaller(this, pluginConfig);
         this.pausedMatchStore = new PausedMatchStore(this);
+        this.preparedMatchStore = new PreparedMatchStore(this);
+        this.matchStatsStore = new MatchStatsStore(this);
         this.gameManager = new GameManager(
             this,
             pluginConfig,
@@ -82,13 +97,28 @@ public final class HuntCorePlugin extends JavaPlugin {
             structureHintService,
             matchCountdown,
             compassTracker,
-            pausedMatchStore
+            pausedMatchStore,
+            preparedMatchStore,
+            matchStatsStore,
+            teleportSafetyService
         );
-        this.pvpArenaManager = new PvpArenaManager(pluginConfig, playerRegistry, lobbyService, gameManager);
+        this.pvpArenaManager = new PvpArenaManager(pluginConfig, playerRegistry, lobbyService, gameManager, teleportSafetyService);
+
+        PausedMatchSnapshot pausedSnapshot = pausedMatchStore.load();
+        Set<String> preservedWorlds = new HashSet<>();
+        if (pausedSnapshot != null) {
+            preservedWorlds.add(pausedSnapshot.matchWorldSet().getBaseName());
+        }
+        for (MatchWorldSet worldSet : preparedMatchStore.loadWorldSetsForCleanup()) {
+            preservedWorlds.add(worldSet.getBaseName());
+        }
+        matchWorldService.cleanupOrphanedMatchWorlds(preservedWorlds);
 
         lobbyMapInstaller.ensureConfiguredLobbyWorldLoaded();
         pvpMapInstaller.ensureConfiguredPvpWorldLoaded();
         gameManager.restorePausedMatchIfPresent();
+        gameManager.restorePreparedMatchesIfPresent();
+        gameManager.startCacheMaintenance();
 
         registerCommands();
         registerListeners();
@@ -136,6 +166,8 @@ public final class HuntCorePlugin extends JavaPlugin {
         registerCommand("pvpleave", new PvpLeaveCommand(pvpArenaManager));
         registerCommand("pause", new PauseCommand(gameManager));
         registerCommand("unpause", new UnpauseCommand(gameManager));
+        registerCommand("huntstatus", new HuntStatusCommand(gameManager));
+        registerCommand("matchstats", new MatchStatsCommand(gameManager));
     }
 
     private void registerListeners() {
@@ -144,7 +176,7 @@ public final class HuntCorePlugin extends JavaPlugin {
             this
         );
         Bukkit.getPluginManager().registerEvents(
-            new MatchEventListener(this, gameManager),
+            new MatchEventListener(this, gameManager, pvpArenaManager),
             this
         );
         Bukkit.getPluginManager().registerEvents(

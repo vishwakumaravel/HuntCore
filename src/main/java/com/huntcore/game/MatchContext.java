@@ -20,6 +20,7 @@ public final class MatchContext {
     private final long startedAtMillis;
     private Location runnerLastKnownLocation;
     private final Map<UUID, Location> hunterLastKnownLocations = new HashMap<>();
+    private final Map<UUID, Integer> playerKillCounts = new HashMap<>();
 
     public MatchContext(
         UUID runnerId,
@@ -110,5 +111,21 @@ public final class MatchContext {
 
         Location hunterLocation = hunterLastKnownLocations.get(playerId);
         return hunterLocation == null ? null : hunterLocation.clone();
+    }
+
+    public void recordKill(UUID playerId) {
+        if (!involves(playerId)) {
+            return;
+        }
+
+        playerKillCounts.merge(playerId, 1, Integer::sum);
+    }
+
+    public int getKillCount(UUID playerId) {
+        return playerKillCounts.getOrDefault(playerId, 0);
+    }
+
+    public Map<UUID, Integer> getKillCounts() {
+        return Collections.unmodifiableMap(playerKillCounts);
     }
 }

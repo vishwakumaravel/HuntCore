@@ -96,6 +96,24 @@ public final class PausedMatchStore {
         }
     }
 
+    public MatchWorldSet loadWorldSetForCleanup() {
+        if (!storageFile.exists()) {
+            return null;
+        }
+
+        try {
+            YamlConfiguration config = YamlConfiguration.loadConfiguration(storageFile);
+            String baseName = config.getString("match-world-base-name", "");
+            if (baseName.isBlank()) {
+                return null;
+            }
+
+            return new MatchWorldSet(baseName);
+        } catch (RuntimeException exception) {
+            return null;
+        }
+    }
+
     public void delete() {
         if (storageFile.exists()) {
             storageFile.delete();

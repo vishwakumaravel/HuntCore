@@ -2,6 +2,7 @@ package com.huntcore.listener;
 
 import com.huntcore.HuntCorePlugin;
 import com.huntcore.game.GameManager;
+import com.huntcore.pvp.PvpArenaManager;
 import org.bukkit.Location;
 import org.bukkit.NamespacedKey;
 import org.bukkit.entity.Player;
@@ -19,15 +20,19 @@ public final class MatchEventListener implements Listener {
 
     private final HuntCorePlugin plugin;
     private final GameManager gameManager;
+    private final PvpArenaManager pvpArenaManager;
 
-    public MatchEventListener(HuntCorePlugin plugin, GameManager gameManager) {
+    public MatchEventListener(HuntCorePlugin plugin, GameManager gameManager, PvpArenaManager pvpArenaManager) {
         this.plugin = plugin;
         this.gameManager = gameManager;
+        this.pvpArenaManager = pvpArenaManager;
     }
 
     @EventHandler(ignoreCancelled = true)
     public void onFoodLevelChange(FoodLevelChangeEvent event) {
-        if (event.getEntity() instanceof Player player && gameManager.shouldPreventHunger(player.getUniqueId())) {
+        if (event.getEntity() instanceof Player player
+            && !pvpArenaManager.isPvpParticipant(player.getUniqueId())
+            && gameManager.shouldPreventHunger(player.getUniqueId())) {
             event.setCancelled(true);
         }
     }
@@ -35,6 +40,10 @@ public final class MatchEventListener implements Listener {
     @EventHandler
     public void onPlayerDeath(PlayerDeathEvent event) {
         Player player = event.getEntity();
+        Player killer = player.getKiller();
+        if (killer != null) {
+            gameManager.handleParticipantKill(killer, player);
+        }
         if (gameManager.isActiveRunner(player.getUniqueId())) {
             gameManager.handleRunnerDeath(player);
             return;
