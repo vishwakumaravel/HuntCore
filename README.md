@@ -1,22 +1,37 @@
 # HuntCore
 
-HuntCore is a simple, polished Paper minigame plugin for a hunt-style server. The current version focuses on a clean lobby flow, one runner versus one or more hunters, infinite hunter respawns, spectator support, runner head start, fresh temporary match worlds, portal-aware hunter compass tracking across the overworld, Nether, and End, and a clear post-match summary.
+HuntCore is a Paper plugin for a polished manhunt server loop: one runner, one or more hunters, fresh temporary match worlds, portal-aware tracking, persistent pause/resume (saves even when server closed), a configurable parkour waiting lobby, and a separate PvP arena side mode.
+
+The project is now in a stable gameplay state with prescouted match caching, in-game status tools, recent match history, and clean lobby-to-match flow.
 
 ## Requirements
 
 - Java 21+
-- A local Paper server for Minecraft 1.21.x
+- Paper for Minecraft 1.21.x
 
-Paper's current project setup guide shows Paper API with Gradle Kotlin DSL and Java 21 toolchains:
+Paper setup guide:
 https://docs.papermc.io/paper/dev/project-setup
+
+## Highlights
+
+- One runner versus one or more hunters
+- Infinite hunter respawns
+- Fresh temporary overworld, Nether, and End per round
+- Runner wins by killing the Ender Dragon in the fresh match End
+- Cross-dimension hunter compass tracking with portal memory
+- Spectator mode that stays out of ready checks and win conditions
+- Persistent `/pause` and `/unpause`, including clean server restart resume
+- Prescouted match-world cache with strong nearby POI selection
+- Importable waiting-lobby maps and PvP arena maps from `.zip` worlds
+- In-game `/huntstatus` and `/matchstats`
 
 ## Project Layout
 
 - `src/main/java/com/huntcore` contains the plugin code
-- `src/main/resources/plugin.yml` registers the plugin and commands
-- `src/main/resources/config.yml` contains tweakable values for the lobby, countdowns, and match spawn settings
+- `src/main/resources/plugin.yml` registers commands and permissions
+- `src/main/resources/config.yml` contains default lobby, PvP, countdown, tracking, and match settings
 
-## Build The Jar
+## Build
 
 From the project root:
 
@@ -24,7 +39,7 @@ From the project root:
 .\gradlew.bat build
 ```
 
-The output jar will be created in:
+Output jar:
 
 ```text
 build/libs/HuntCore-2.0.0-SNAPSHOT.jar
@@ -32,96 +47,134 @@ build/libs/HuntCore-2.0.0-SNAPSHOT.jar
 
 If you already have Gradle installed, `gradle build` works too.
 
-## Run On A Local Paper Server
+## Local Server Setup
 
-1. Build the plugin jar.
-2. Copy the jar from `build/libs/` into your Paper server's `plugins/` folder.
-3. Start the server once so `plugins/HuntCore/config.yml` is created.
-4. Adjust `config.yml` values if you want a custom lobby spawn, PvP arena spawn, different countdowns, or a different temporary match world prefix.
+1. Build the jar.
+2. Copy `build/libs/HuntCore-2.0.0-SNAPSHOT.jar` into your Paper server `plugins/` folder.
+3. Start the server once so `plugins/HuntCore/config.yml` is generated.
+4. Adjust config values if needed.
 5. Restart the server.
 
-To use a downloaded parkour world as the waiting lobby:
+## Lobby And PvP World Import
+
+Waiting lobby:
 
 1. Run `/installlobbymap <zip-path> [world-name]`
-2. Let HuntCore import the map as a separate lobby world
-3. Use `/setlobby` if you want a more precise spawn point than the imported world spawn
+2. Run `/setlobby` at the exact lobby spawn you want
 
-To use a downloaded PvP world as the arena:
+PvP arena:
 
 1. Run `/installpvpmap <zip-path> [world-name]`
-2. Let HuntCore import the map as a separate PvP world
-3. Use `/setpvpspawn` if you want a precise combat respawn point
+2. Enter with `/pvp`
+3. Run `/setpvpspawn` at the exact arena spawn you want
 
-## Open In VS Code
-
-1. Open the `HuntCore` folder in VS Code.
-2. Install the Java Extension Pack.
-3. Install the Gradle for Java extension if you want task buttons inside the editor.
-4. Make sure VS Code points at a Java 21+ JDK.
-5. Import the Gradle project when prompted.
+Imported lobby and PvP worlds stay persistent. Match worlds do not.
 
 ## Commands
 
-- `/runner` selects the runner role
-- `/hunter` selects the hunter role
-- `/spectate` toggles spectator mode and spectators do not count toward ready checks
-- `/ready` marks the player ready
-- `/unready` removes ready status
-- `/hunterkeepinventory <on|off|toggle|status>` changes whether hunters keep items and XP on death
-- `/setlobby` saves your current location as the waiting lobby spawn
-- `/setpvpspawn` saves your current location as the PvP arena spawn
-- `/reset` returns you to the waiting lobby spawn
-- `/pvp` enters the PvP arena with a fixed diamond loadout
-- `/pvpleave` restores your saved state and leaves the PvP arena
-- `/pause` pauses the active match so players can disconnect and reconnect safely
-- `/unpause` resumes a paused match once the runner and at least one hunter are online
-- `/installlobbymap [zip-path] [world-name]` imports a world zip as a dedicated waiting lobby world
-- `/installpvpmap [zip-path] [world-name]` imports a world zip as a dedicated PvP arena world
+Public commands:
+
+- `/runner` select the runner role
+- `/hunter` select the hunter role
+- `/spectate` toggle spectator mode
+- `/ready` mark yourself ready
+- `/unready` remove your ready status
+- `/reset` return to the waiting lobby spawn
+- `/pvp` enter the PvP arena
+- `/pvpleave` leave the PvP arena and restore your previous state
+- `/huntstatus` show current lobby, cache, and match status
+- `/matchstats [1-10]` show recent recorded match results
+
+Admin commands:
+
+- `/hunterkeepinventory <on|off|toggle|status>` toggle hunter keep-inventory behavior
+- `/setlobby` save your current location as the waiting lobby spawn
+- `/setpvpspawn` save your current location as the PvP arena spawn
+- `/pause` pause the current match
+- `/unpause` resume a paused match when the runner and at least one hunter are online
+- `/installlobbymap [zip-path] [world-name]` import a dedicated waiting-lobby world
+- `/installpvpmap [zip-path] [world-name]` import a dedicated PvP arena world
+
+## Match Flow
+
+- Only queued runners and hunters count toward match start checks
+- Spectators and unassigned players do not block the countdown
+- Matches begin from a prescouted cached world when possible
+- The runner receives a nearby POI scout note with direction and yaw guidance
+- Hunters are released after the configured head start
+- If the runner dies, hunters win immediately
+- If the runner kills the Ender Dragon, the runner wins immediately
+
+## Pause And Reconnect
+
+- `/pause` suspends the round and disables disconnect-loss timers
+- `/unpause` only resumes if the runner and at least one hunter are online
+- Paused matches survive a clean Paper restart
+- Runner and hunter disconnect grace still applies during normal live rounds
+
+## Lobby And PvP Notes
+
+- The lobby stays persistent and can be any imported world, including parkour maps
+- The PvP arena is a separate persistent world with a fixed combat loadout and respawn loop
+- Leaving PvP restores your saved inventory, XP, location, role, and other player state
+- Hunger behavior in lobby and PvP is aligned with the normal survival match setup as closely as possible from plugin-side state
+
+## Status And History
+
+- `/huntstatus` shows:
+  - current game state
+  - prescouted cache size
+  - scouting status
+  - active runner/hunter summary
+  - best cached POI
+  - latest recorded match result
+
+- `/matchstats` shows recent matches with:
+  - winner
+  - duration
+  - runner
+  - hunter count
+  - POI
+  - end reason
+  - per-player kill counts
+
+Match history is stored in:
+
+```text
+plugins/HuntCore/match-history.yml
+```
+
+Prepared match cache is stored in:
+
+```text
+plugins/HuntCore/prepared-matches.yml
+```
+
+Paused match persistence is stored in:
+
+```text
+plugins/HuntCore/paused-match.yml
+```
 
 ## Config Notes
 
 The default config includes:
 
-- Lobby world and spawn settings
-- PvP world and spawn settings
-- Optional lobby zip import path and world-name defaults
-- Optional PvP zip import path and world-name defaults
-- The lobby can be a separate sky platform or prebuilt parkour area
-- Temporary match world prefix
-- Match start countdown length
-- Runner head start length
-- Random spawn radius and attempt count
-- Structure hint search radius
-- Disconnect grace time for reconnects
-- Hunter compass update interval
-- Return-to-lobby delay after the match ends
+- lobby world/spawn settings
+- PvP world/spawn settings
+- zip import defaults for lobby and PvP maps
+- match world prefix
+- match start countdown length
+- hunter head start length
+- spawn radius and spawn-attempt count
+- disconnect grace length
+- hunter keep-inventory toggle
+- compass update rate
+- portal memory time
+- return-to-lobby delay
 
-## Current Version Notes
-
-- Matches use one runner and one or more hunters
-- If the runner dies, the match ends immediately and hunters win
-- The runner wins by killing the Ender Dragon in a fresh match End
-- Hunters respawn infinitely and stay in the same match after death
-- Matches create fresh temporary overworld, Nether, and End worlds for each round
-- Match participants get a reconnect grace period and are restored into the round if they return in time
-- Paused matches stay suspended until `/unpause`, and pause mode disables disconnect-loss timers
-- Paused matches also survive a clean Paper server stop/start, and the match worlds are kept until the round resumes or ends
-- Runner and hunter advancements are reset fully at the start of each round so match progress is fresh every time
-- Spectators are separate from active roles and do not affect ready checks or win conditions
-- The lobby stays in Adventure mode
-- The waiting lobby can be moved in game with `/setlobby`, which is useful for sky parkour hubs
-- Downloaded parkour maps can be imported as a separate lobby world with `/installlobbymap`
-- Waiting-lobby PvP is available with `/pvp` and `/pvpleave`, with saved state restore when you leave
-- Downloaded PvP arena maps can be imported as a separate world with `/installpvpmap`
-- Hunter compasses track directly in the same dimension and fall back to recent runner portal locations across dimensions
-- The structure hint is a rough direction toward a nearby village, ruined portal, or pillager outpost
-
-## Arena Map Note
-
-- `minecraft-pvp-arena.zip` is a valid Minecraft world archive, but it was last saved as a 1.17.1 Fabric world
-- Paper 1.21.x will need to upgrade it on first load, so it is likely usable if it only contains vanilla world data
-- If Paper cannot load it cleanly, HuntCore will leave the import unfinished and show the failure message instead of partially switching the arena
-
-## Current Limitations / TODO
+## Current Limitations
 
 - The current match flow supports exactly one runner
+- Match stats are file-backed YAML, not database-backed yet
+- The plugin is optimized for local/small-server play rather than multi-server network sync
