@@ -1,0 +1,18 @@
+spring:
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/huntcore}
+    username: ${SPRING_DATASOURCE_USERNAME:huntcore}
+    password: ${SPRING_DATASOURCE_PASSWORD:huntcore}
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+
+server:
+  port: ${SERVER_PORT:8080}
+
+huntcore:
+  ingest:
+    api-key: ${HUNTCORE_INGEST_API_KEY:}
+  public-api:
+    allowed-origin: ${HUNTCORE_PUBLIC_ALLOWED_ORIGIN:*}
+    stale-threshold-seconds: ${HUNTCORE_PUBLIC_STALE_THRESHOLD_SECONDS:90}

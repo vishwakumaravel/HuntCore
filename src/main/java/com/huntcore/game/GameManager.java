@@ -1,6 +1,10 @@
 package com.huntcore.game;
 
 import com.huntcore.HuntCorePlugin;
+import com.huntcore.backend.ActiveMatchSnapshot;
+import com.huntcore.backend.BackendSyncSink;
+import com.huntcore.backend.CompletedMatchSnapshot;
+import com.huntcore.backend.ServerStatusSnapshot;
 import com.huntcore.config.PluginConfig;
 import com.huntcore.tracking.CompassTracker;
 import com.huntcore.world.MatchSpawnService;
@@ -78,6 +82,8 @@ public final class GameManager {
     private BukkitTask huntersDisconnectTask;
     private GameState pausedResumeState = GameState.IN_GAME;
     private int headStartSecondsRemaining;
+    private BackendSyncSink backendSyncSink = BackendSyncSink.NO_OP;
+    private CompletedMatchSnapshot latestCompletedMatchSnapshot;
 
     public GameManager(
         HuntCorePlugin plugin,
@@ -107,10 +113,15 @@ public final class GameManager {
         this.preparedMatchStore = preparedMatchStore;
         this.matchStatsStore = matchStatsStore;
         this.teleportSafetyService = teleportSafetyService;
+        this.latestCompletedMatchSnapshot = toCompletedMatchSnapshot(matchStatsStore.loadLatest());
     }
 
     public GameState getGameState() {
         return gameState;
+    }
+
+    public void setBackendSyncSink(BackendSyncSink backendSyncSink) {
+        this.backendSyncSink = backendSyncSink == null ? BackendSyncSink.NO_OP : backendSyncSink;
     }
 
     public boolean isLobbyEditable() {
@@ -200,6 +211,41 @@ public final class GameManager {
         }
 
         return lines;
+    }
+
+    public ServerStatusSnapshot buildServerStatusSnapshot() {
+        Collection<? extends Player> onlinePlayers = Bukkit.getOnlinePlayers();
+        int queuedRunnerCount = playerRegistry.getOnlinePlayersWithRole(onlinePlayers, PlayerRole.RUNNER).size();
+        int queuedHunterCount = playerRegistry.getOnlinePlayersWithRole(onlinePlayers, PlayerRole.HUNTER).size();
+        int spectatorCount = playerRegistry.getOnlinePlayersWithRole(onlinePlayers, PlayerRole.SPECTATOR).size();
+        int queuedCount = queuedRunnerCount + queuedHunterCount;
+        int readyCount = 0;
+
+        for (Player player : onlinePlayers) {
+            PlayerRole role = playerRegistry.getRole(player.getUniqueId());
+            if ((role == PlayerRole.RUNNER || role == PlayerRole.HUNTER) && playerRegistry.isReady(player.getUniqueId())) {
+                readyCount++;
+            }
+        }
+
+        return new ServerStatusSnapshot(
+            System.currentTimeMillis(),
+            plugin.getDescription().getVersion(),
+            plugin.getServer().getName(),
+            plugin.getServer().getVersion(),
+            gameState.name(),
+            preparedMatches.size(),
+            activePreparationId != null,
+            queuedRunnerCount,
+            queuedHunterCount,
+            spectatorCount,
+            queuedCount,
+            readyCount,
+            gameState == GameState.HEAD_START ? headStartSecondsRemaining : null,
+            gameState == GameState.PAUSED ? pausedResumeState.name() : null,
+            buildActiveMatchSnapshot(),
+            latestCompletedMatchSnapshot
+        );
     }
 
     public List<String> getMatchHistoryLines(int limit) {
@@ -678,6 +724,34 @@ public final class GameManager {
         return true;
     }
 
+    public boolean quitMatch(Player player) {
+        UUID playerId = player.getUniqueId();
+        if (isSpectator(playerId)) {
+            playerRegistry.setRole(playerId, PlayerRole.NONE);
+            lobbyService.sendToLobby(player, true);
+            player.sendMessage("[HuntCore] Left spectator mode and returned to the waiting lobby.");
+            handleLobbyStateChange();
+            return true;
+        }
+
+        if (currentMatch == null || (!isLiveMatchState() && gameState != GameState.PAUSED) || !currentMatch.involves(playerId)) {
+            player.sendMessage("[HuntCore] You are not in an active match.");
+            return true;
+        }
+
+        playerRegistry.setRole(playerId, PlayerRole.NONE);
+        lobbyService.sendToLobby(player, true);
+        player.sendMessage("[HuntCore] You left the match and returned to the waiting lobby.");
+
+        if (currentMatch.isRunner(playerId)) {
+            endMatch(MatchWinner.HUNTERS, player.getName() + " forfeited the match.");
+            return true;
+        }
+
+        endMatch(MatchWinner.RUNNER, player.getName() + " forfeited the match.");
+        return true;
+    }
+
     public boolean toggleSpectatorMode(Player player) {
         UUID playerId = player.getUniqueId();
         if (isRoleSelectionLocked(player)) {
@@ -899,6 +973,7 @@ public final class GameManager {
 
         persistPausedMatch();
         Bukkit.broadcastMessage("[HuntCore] Match paused. Players may disconnect until /unpause.");
+        backendSyncSink.requestHeartbeat();
         return true;
     }
 
@@ -930,6 +1005,7 @@ public final class GameManager {
             gameState = GameState.HEAD_START;
             Bukkit.broadcastMessage("[HuntCore] Match resumed. Hunters release in " + headStartSecondsRemaining + " seconds.");
             resumeHeadStart(runner);
+            backendSyncSink.requestHeartbeat();
             return true;
         }
 
@@ -947,12 +1023,14 @@ public final class GameManager {
         );
 
         Bukkit.broadcastMessage("[HuntCore] Match resumed.");
+        backendSyncSink.requestHeartbeat();
         return true;
     }
 
     private void startMatchCountdown() {
         gameState = GameState.COUNTDOWN;
         Bukkit.broadcastMessage("[HuntCore] All players are ready. Match starts in " + pluginConfig.getMatchStartSeconds() + " seconds.");
+        backendSyncSink.requestHeartbeat();
 
         matchCountdown.start(
             pluginConfig.getMatchStartSeconds(),
@@ -984,6 +1062,7 @@ public final class GameManager {
             discardPreparedMatches();
         }
         Bukkit.broadcastMessage("[HuntCore] Match countdown cancelled: " + reason);
+        backendSyncSink.requestHeartbeat();
     }
 
     private void beginMatch() {
@@ -1055,6 +1134,7 @@ public final class GameManager {
         rememberRecentPoiType(preparation.structureHint().displayName());
         handleLobbyStateChange();
         startHeadStart(runner);
+        backendSyncSink.requestHeartbeat();
     }
 
     private void startHeadStart(Player runner) {
@@ -1117,6 +1197,7 @@ public final class GameManager {
         );
 
         Bukkit.broadcastMessage("[HuntCore] Hunters released. Good luck.");
+        backendSyncSink.requestHeartbeat();
     }
 
     private void endMatch(MatchWinner winner, String reason) {
@@ -1141,9 +1222,12 @@ public final class GameManager {
         String winnerText = winner == MatchWinner.RUNNER ? "Runner" : "Hunters";
         long durationMillis = System.currentTimeMillis() - finishedMatch.getStartedAtMillis();
         String durationText = formatDuration(durationMillis);
+        CompletedMatchSnapshot completedMatchSnapshot = buildCompletedMatchSnapshot(finishedMatch, winnerText, reason, durationMillis);
         Bukkit.broadcastMessage("[HuntCore] " + winnerText + " win! " + reason + " Duration: " + durationText + ".");
         showMatchSummary(winnerText, reason, durationText);
-        recordMatchStats(finishedMatch, winnerText, reason, durationMillis);
+        recordMatchStats(completedMatchSnapshot);
+        backendSyncSink.publishCompletedMatch(completedMatchSnapshot);
+        backendSyncSink.requestHeartbeat();
 
         // TODO HuntCore v2: expand the end summary into a reusable match recap object when stats are added.
         cancelTask(endTask);
@@ -1155,6 +1239,15 @@ public final class GameManager {
         endTask = null;
 
         for (Player onlinePlayer : Bukkit.getOnlinePlayers()) {
+            if (onlinePlayer.isDead()) {
+                onlinePlayer.spigot().respawn();
+                Bukkit.getScheduler().runTask(plugin, () -> {
+                    lobbyService.sendToLobby(onlinePlayer, true);
+                    compassTracker.removeHunterCompasses(onlinePlayer);
+                });
+                continue;
+            }
+
             lobbyService.sendToLobby(onlinePlayer, true);
             compassTracker.removeHunterCompasses(onlinePlayer);
         }
@@ -1168,6 +1261,7 @@ public final class GameManager {
         cleanupActiveMatchWorlds();
         Bukkit.broadcastMessage("[HuntCore] Returned to the lobby. Choose /runner, /hunter, or /spectate.");
         handleLobbyStateChange();
+        backendSyncSink.requestHeartbeat();
     }
 
     private String getStartBlocker() {
@@ -1329,21 +1423,21 @@ public final class GameManager {
         return bestPreparation == null ? preparedMatches.get(0) : bestPreparation;
     }
 
-    private void recordMatchStats(MatchContext finishedMatch, String winnerText, String reason, long durationMillis) {
+    private void recordMatchStats(CompletedMatchSnapshot completedMatchSnapshot) {
+        latestCompletedMatchSnapshot = completedMatchSnapshot;
         try {
-            StructureHint structureHint = finishedMatch.getStructureHint();
             matchStatsStore.append(
                 new MatchStatsStore.MatchStatSnapshot(
-                    System.currentTimeMillis(),
-                    durationMillis,
-                    winnerText,
-                    reason,
-                    resolvePlayerName(finishedMatch.getRunnerId()),
-                    finishedMatch.getHunterIds().size(),
-                    structureHint == null ? "none" : structureHint.displayName(),
-                    structureHint == null ? 0 : structureHint.approximateDistanceBlocks(),
-                    finishedMatch.getMatchWorldSet().getBaseName(),
-                    buildRecordedKillMap(finishedMatch)
+                    completedMatchSnapshot.endedAtMillis(),
+                    completedMatchSnapshot.durationMillis(),
+                    completedMatchSnapshot.winner(),
+                    completedMatchSnapshot.reason(),
+                    completedMatchSnapshot.runnerName(),
+                    completedMatchSnapshot.hunterCount(),
+                    completedMatchSnapshot.poiName(),
+                    completedMatchSnapshot.poiDistanceBlocks(),
+                    completedMatchSnapshot.matchWorldBaseName(),
+                    completedMatchSnapshot.playerKills()
                 )
             );
         } catch (java.io.IOException exception) {
@@ -1363,6 +1457,63 @@ public final class GameManager {
 
     private String formatState(GameState state) {
         return state.name().toLowerCase(Locale.ROOT).replace('_', ' ');
+    }
+
+    private ActiveMatchSnapshot buildActiveMatchSnapshot() {
+        if (currentMatch == null) {
+            return null;
+        }
+
+        StructureHint structureHint = currentMatch.getStructureHint();
+        return new ActiveMatchSnapshot(
+            resolvePlayerName(currentMatch.getRunnerId()),
+            currentMatch.getHunterIds().stream().map(this::resolvePlayerName).toList(),
+            currentMatch.getHunterIds().size(),
+            structureHint == null ? "none" : structureHint.displayName(),
+            structureHint == null ? 0 : structureHint.approximateDistanceBlocks(),
+            currentMatch.getMatchWorldSet().getBaseName(),
+            currentMatch.getStartedAtMillis()
+        );
+    }
+
+    private CompletedMatchSnapshot buildCompletedMatchSnapshot(
+        MatchContext finishedMatch,
+        String winnerText,
+        String reason,
+        long durationMillis
+    ) {
+        StructureHint structureHint = finishedMatch.getStructureHint();
+        return new CompletedMatchSnapshot(
+            System.currentTimeMillis(),
+            durationMillis,
+            winnerText,
+            reason,
+            resolvePlayerName(finishedMatch.getRunnerId()),
+            finishedMatch.getHunterIds().size(),
+            structureHint == null ? "none" : structureHint.displayName(),
+            structureHint == null ? 0 : structureHint.approximateDistanceBlocks(),
+            finishedMatch.getMatchWorldSet().getBaseName(),
+            buildRecordedKillMap(finishedMatch)
+        );
+    }
+
+    private CompletedMatchSnapshot toCompletedMatchSnapshot(MatchStatsStore.MatchStatSnapshot snapshot) {
+        if (snapshot == null) {
+            return null;
+        }
+
+        return new CompletedMatchSnapshot(
+            snapshot.endedAtMillis(),
+            snapshot.durationMillis(),
+            snapshot.winner(),
+            snapshot.reason(),
+            snapshot.runnerName(),
+            snapshot.hunterCount(),
+            snapshot.poiName(),
+            snapshot.poiDistanceBlocks(),
+            snapshot.matchWorldBaseName(),
+            snapshot.playerKills()
+        );
     }
 
     private java.util.Map<String, Integer> buildRecordedKillMap(MatchContext finishedMatch) {

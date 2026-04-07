@@ -1,5 +1,6 @@
 package com.huntcore;
 
+import com.huntcore.backend.BackendSyncService;
 import com.huntcore.command.HunterKeepInventoryCommand;
 import com.huntcore.command.HuntStatusCommand;
 import com.huntcore.command.InstallLobbyMapCommand;
@@ -8,6 +9,7 @@ import com.huntcore.command.MatchStatsCommand;
 import com.huntcore.command.PauseCommand;
 import com.huntcore.command.PvpCommand;
 import com.huntcore.command.PvpLeaveCommand;
+import com.huntcore.command.QuitCommand;
 import com.huntcore.command.ReadyCommand;
 import com.huntcore.command.ResetCommand;
 import com.huntcore.command.RoleCommand;
@@ -67,6 +69,7 @@ public final class HuntCorePlugin extends JavaPlugin {
     private PausedMatchStore pausedMatchStore;
     private PreparedMatchStore preparedMatchStore;
     private MatchStatsStore matchStatsStore;
+    private BackendSyncService backendSyncService;
 
     @Override
     public void onEnable() {
@@ -102,6 +105,8 @@ public final class HuntCorePlugin extends JavaPlugin {
             matchStatsStore,
             teleportSafetyService
         );
+        this.backendSyncService = new BackendSyncService(this, pluginConfig, gameManager);
+        this.gameManager.setBackendSyncSink(backendSyncService);
         this.pvpArenaManager = new PvpArenaManager(pluginConfig, playerRegistry, lobbyService, gameManager, teleportSafetyService);
 
         PausedMatchSnapshot pausedSnapshot = pausedMatchStore.load();
@@ -138,10 +143,15 @@ public final class HuntCorePlugin extends JavaPlugin {
                 lobbyService.sendToLobby(player, true);
             });
         }
+
+        backendSyncService.start();
     }
 
     @Override
     public void onDisable() {
+        if (backendSyncService != null) {
+            backendSyncService.shutdown();
+        }
         if (gameManager != null) {
             gameManager.shutdown();
         }
@@ -162,6 +172,7 @@ public final class HuntCorePlugin extends JavaPlugin {
         registerCommand("installlobbymap", new InstallLobbyMapCommand(lobbyMapInstaller));
         registerCommand("installpvpmap", new InstallPvpMapCommand(pvpMapInstaller));
         registerCommand("reset", new ResetCommand(gameManager, pvpArenaManager));
+        registerCommand("quit", new QuitCommand(gameManager, pvpArenaManager));
         registerCommand("pvp", new PvpCommand(pvpArenaManager));
         registerCommand("pvpleave", new PvpLeaveCommand(pvpArenaManager));
         registerCommand("pause", new PauseCommand(gameManager));

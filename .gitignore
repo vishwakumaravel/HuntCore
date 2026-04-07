@@ -4,3 +4,5 @@ build/
 .vscode/
 out/
 bin/
+huntcore-stack.local.ps1
+logs/

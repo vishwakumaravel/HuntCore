@@ -23,6 +23,7 @@ public final class StructureHintService {
     private static final double PREFERRED_HINT_DISTANCE_BLOCKS = 250.0;
     private static final double PREFERRED_HINT_RANGE_BLOCKS = 70.0;
     private static final double MAX_HINT_DISTANCE_BLOCKS = 400.0;
+    private static final double MIN_RUINED_PORTAL_Y = 30.0;
 
     @SuppressWarnings("unused")
     private final PluginConfig pluginConfig;
@@ -49,10 +50,14 @@ public final class StructureHintService {
                     continue;
                 }
 
+                if (structureName.equals("ruined portal") && structure.getBoundingBox().getMaxY() < MIN_RUINED_PORTAL_Y) {
+                    continue;
+                }
+
                 Location candidate = new Location(
                     chunk.getWorld(),
                     structure.getBoundingBox().getCenterX(),
-                    origin.getY(),
+                    structure.getBoundingBox().getCenterY(),
                     structure.getBoundingBox().getCenterZ()
                 );
                 if (!isUsableCandidate(origin, candidate)) {

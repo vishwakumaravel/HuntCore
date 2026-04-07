@@ -1,18 +1,26 @@
 # HuntCore
 
-HuntCore is a Paper plugin for a polished manhunt server loop: one runner, one or more hunters, fresh temporary match worlds, portal-aware tracking, persistent pause/resume (saves even when server closed), a configurable parkour waiting lobby, and a separate PvP arena side mode.
+HuntCore is a Paper plugin for a polished manhunt server loop: one runner, one or more hunters, fresh temporary match worlds, portal-aware tracking, persistent pause/resume, a configurable parkour waiting lobby, and a separate PvP arena side mode.
 
-The project is now in a stable gameplay state with prescouted match caching, in-game status tools, recent match history, and clean lobby-to-match flow.
+The repo now contains both the gameplay plugin and the backend pieces needed for stats and a future public dashboard.
+
+## What Is In This Repo
+
+- `src/` contains the Paper plugin
+- `backend-api/` contains the real PostgreSQL-backed backend
+- `backend-stub/` contains the lightweight fallback/reference backend
+- `scripts/` contains the Windows startup helpers
 
 ## Requirements
 
-- Java 21+
+- Java 21
 - Paper for Minecraft 1.21.x
+- PostgreSQL if you want to use `backend-api`
 
 Paper setup guide:
 https://docs.papermc.io/paper/dev/project-setup
 
-## Highlights
+## Gameplay Highlights
 
 - One runner versus one or more hunters
 - Infinite hunter respawns
@@ -21,17 +29,11 @@ https://docs.papermc.io/paper/dev/project-setup
 - Cross-dimension hunter compass tracking with portal memory
 - Spectator mode that stays out of ready checks and win conditions
 - Persistent `/pause` and `/unpause`, including clean server restart resume
-- Prescouted match-world cache with strong nearby POI selection
+- Prescouted match-world cache with nearby POI selection
 - Importable waiting-lobby maps and PvP arena maps from `.zip` worlds
 - In-game `/huntstatus` and `/matchstats`
 
-## Project Layout
-
-- `src/main/java/com/huntcore` contains the plugin code
-- `src/main/resources/plugin.yml` registers commands and permissions
-- `src/main/resources/config.yml` contains default lobby, PvP, countdown, tracking, and match settings
-
-## Build
+## Build The Plugin
 
 From the project root:
 
@@ -39,36 +41,21 @@ From the project root:
 .\gradlew.bat build
 ```
 
+Use Java 21 for local builds. The current Gradle setup is not reliable under Java 25 yet.
+
 Output jar:
 
 ```text
 build/libs/HuntCore-2.0.0-SNAPSHOT.jar
 ```
 
-If you already have Gradle installed, `gradle build` works too.
-
-## Local Server Setup
+## Install The Plugin
 
 1. Build the jar.
 2. Copy `build/libs/HuntCore-2.0.0-SNAPSHOT.jar` into your Paper server `plugins/` folder.
 3. Start the server once so `plugins/HuntCore/config.yml` is generated.
 4. Adjust config values if needed.
 5. Restart the server.
-
-## Lobby And PvP World Import
-
-Waiting lobby:
-
-1. Run `/installlobbymap <zip-path> [world-name]`
-2. Run `/setlobby` at the exact lobby spawn you want
-
-PvP arena:
-
-1. Run `/installpvpmap <zip-path> [world-name]`
-2. Enter with `/pvp`
-3. Run `/setpvpspawn` at the exact arena spawn you want
-
-Imported lobby and PvP worlds stay persistent. Match worlds do not.
 
 ## Commands
 
@@ -80,6 +67,7 @@ Public commands:
 - `/ready` mark yourself ready
 - `/unready` remove your ready status
 - `/reset` return to the waiting lobby spawn
+- `/quit` leave the current match, forfeit, and return to the waiting lobby
 - `/pvp` enter the PvP arena
 - `/pvpleave` leave the PvP arena and restore your previous state
 - `/huntstatus` show current lobby, cache, and match status
@@ -95,86 +83,137 @@ Admin commands:
 - `/installlobbymap [zip-path] [world-name]` import a dedicated waiting-lobby world
 - `/installpvpmap [zip-path] [world-name]` import a dedicated PvP arena world
 
-## Match Flow
+## Match Data On Disk
 
-- Only queued runners and hunters count toward match start checks
-- Spectators and unassigned players do not block the countdown
-- Matches begin from a prescouted cached world when possible
-- The runner receives a nearby POI scout note with direction and yaw guidance
-- Hunters are released after the configured head start
-- If the runner dies, hunters win immediately
-- If the runner kills the Ender Dragon, the runner wins immediately
+The plugin still keeps its local YAML data:
 
-## Pause And Reconnect
+- `plugins/HuntCore/match-history.yml`
+- `plugins/HuntCore/prepared-matches.yml`
+- `plugins/HuntCore/paused-match.yml`
 
-- `/pause` suspends the round and disables disconnect-loss timers
-- `/unpause` only resumes if the runner and at least one hunter are online
-- Paused matches survive a clean Paper restart
-- Runner and hunter disconnect grace still applies during normal live rounds
+Those files remain part of the normal gameplay flow even when backend sync is enabled.
 
-## Lobby And PvP Notes
+## Optional Backend Sync
 
-- The lobby stays persistent and can be any imported world, including parkour maps
-- The PvP arena is a separate persistent world with a fixed combat loadout and respawn loop
-- Leaving PvP restores your saved inventory, XP, location, role, and other player state
-- Hunger behavior in lobby and PvP is aligned with the normal survival match setup as closely as possible from plugin-side state
+HuntCore can push best-effort backend updates without affecting gameplay.
 
-## Status And History
+Config block:
 
-- `/huntstatus` shows:
-  - current game state
-  - prescouted cache size
-  - scouting status
-  - active runner/hunter summary
-  - best cached POI
-  - latest recorded match result
-
-- `/matchstats` shows recent matches with:
-  - winner
-  - duration
-  - runner
-  - hunter count
-  - POI
-  - end reason
-  - per-player kill counts
-
-Match history is stored in:
-
-```text
-plugins/HuntCore/match-history.yml
+```yaml
+backend:
+  enabled: false
+  base-url: "http://localhost:8080"
+  server-id: "local-paper"
+  api-key: ""
+  heartbeat-seconds: 15
+  timeout-ms: 3000
 ```
 
-Prepared match cache is stored in:
+Plugin-side write endpoints:
+
+- `PUT /api/v1/servers/{serverId}/heartbeat`
+- `POST /api/v1/matches`
+
+Behavior notes:
+
+- backend sync is optional and disabled by default
+- gameplay remains local-authoritative if the backend is down
+- local YAML match history still writes as before
+- if another local web server already uses `8080`, point HuntCore at another port such as `8081`
+
+## Backend Options
+
+### `backend-api/`
+
+This is the real backend.
+
+It provides:
+
+- ingest routes for plugin heartbeats and finished matches
+- PostgreSQL-backed storage
+- verification routes for local ops/testing
+- public read routes under `/api/v1/public/*` for a future dashboard
+- player lifetime stats based on finished match data
+
+This is the backend the future React dashboard should use.
+
+See [backend-api/README.md](/c:/Users/vkper/Downloads/HuntCore/backend-api/README.md).
+
+### `backend-stub/`
+
+This is the lightweight fallback/reference backend.
+
+It is still useful for:
+
+- very lightweight local contract testing
+- debugging plugin sync without PostgreSQL
+- keeping a minimal reference implementation around
+
+It is not the long-term production path.
+
+See [backend-stub/README.md](/c:/Users/vkper/Downloads/HuntCore/backend-stub/README.md).
+
+## Local Startup
+
+For the closest replacement to the old one-click `start.bat` workflow, use:
 
 ```text
-plugins/HuntCore/prepared-matches.yml
+start-huntcore.bat
 ```
 
-Paused match persistence is stored in:
+That launcher can:
+
+- start `backend-api`
+- wait for backend health
+- launch Paper
+- shut the backend down when Paper exits if the launcher started it
+
+For a reusable local setup, copy:
 
 ```text
-plugins/HuntCore/paused-match.yml
+huntcore-stack.local.example.ps1
 ```
 
-## Config Notes
+to:
 
-The default config includes:
+```text
+huntcore-stack.local.ps1
+```
 
-- lobby world/spawn settings
-- PvP world/spawn settings
-- zip import defaults for lobby and PvP maps
-- match world prefix
-- match start countdown length
-- hunter head start length
-- spawn radius and spawn-attempt count
-- disconnect grace length
-- hunter keep-inventory toggle
-- compass update rate
-- portal memory time
-- return-to-lobby delay
+and fill in your local Paper path, backend port, and PostgreSQL credentials. The local file is git-ignored.
+
+If you prefer the script directly:
+
+```powershell
+.\scripts\start-huntcore-stack.ps1
+```
+
+## Public Stats API
+
+The public read API now lives under:
+
+- `/api/v1/public/servers`
+- `/api/v1/public/servers/{serverId}`
+- `/api/v1/public/matches`
+- `/api/v1/public/players`
+- `/api/v1/public/players/{playerName}`
+- `/api/v1/public/players/{playerName}/matches`
+
+These routes are the intended contract for a future React stats dashboard.
+
+## Future Frontend Direction
+
+The current plan is:
+
+- keep the Java backend separate
+- build a React dashboard against `/api/v1/public/*`
+- target a static host such as Cloudflare Pages for the frontend
+
+Static hosting only solves the frontend. The Java API and PostgreSQL still need their own host.
 
 ## Current Limitations
 
 - The current match flow supports exactly one runner
-- Match stats are file-backed YAML, not database-backed yet
-- The plugin is optimized for local/small-server play rather than multi-server network sync
+- Deaths and KD are not tracked in backend player stats
+- The React dashboard is not built yet
+- The backend is ready for public read traffic, but final always-on internet hosting is still a separate deployment step

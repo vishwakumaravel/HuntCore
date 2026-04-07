@@ -35,6 +35,9 @@ commands:
   reset:
     description: Return to the waiting lobby spawn.
     usage: /reset
+  quit:
+    description: Leave the current match and forfeit.
+    usage: /quit
   pvp:
     description: Enter the PvP arena.
     usage: /pvp

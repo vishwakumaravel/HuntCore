@@ -43,5 +43,13 @@ tracking:
   compass-update-ticks: 20
   portal-memory-seconds: 180
 
+backend:
+  enabled: false
+  base-url: "http://localhost:8080"
+  server-id: ""
+  api-key: ""
+  heartbeat-seconds: 15
+  timeout-ms: 3000
+
 end-of-match:
   return-to-lobby-seconds: 5

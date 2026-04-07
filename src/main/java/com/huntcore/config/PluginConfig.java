@@ -63,6 +63,30 @@ public final class PluginConfig {
         return plugin.getConfig().getInt("end-of-match.return-to-lobby-seconds", 5);
     }
 
+    public boolean isBackendEnabled() {
+        return plugin.getConfig().getBoolean("backend.enabled", false);
+    }
+
+    public String getBackendBaseUrl() {
+        return plugin.getConfig().getString("backend.base-url", "").trim();
+    }
+
+    public String getBackendServerId() {
+        return plugin.getConfig().getString("backend.server-id", "").trim();
+    }
+
+    public String getBackendApiKey() {
+        return plugin.getConfig().getString("backend.api-key", "").trim();
+    }
+
+    public int getBackendHeartbeatSeconds() {
+        return Math.max(5, plugin.getConfig().getInt("backend.heartbeat-seconds", 15));
+    }
+
+    public int getBackendTimeoutMillis() {
+        return Math.max(500, plugin.getConfig().getInt("backend.timeout-ms", 3000));
+    }
+
     public Location getLobbySpawn(Server server) {
         FileConfiguration config = plugin.getConfig();
         World world = server.getWorld(getLobbyWorldName());
