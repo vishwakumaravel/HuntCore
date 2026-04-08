@@ -2,13 +2,14 @@
 
 HuntCore is a Paper plugin for a polished manhunt server loop: one runner, one or more hunters, fresh temporary match worlds, portal-aware tracking, persistent pause/resume, a configurable parkour waiting lobby, and a separate PvP arena side mode.
 
-The repo now contains both the gameplay plugin and the backend pieces needed for stats and a future public dashboard.
+The repo now contains the gameplay plugin plus the backend and frontend pieces needed for live stats and a public dashboard.
 
 ## What Is In This Repo
 
 - `src/` contains the Paper plugin
 - `backend-api/` contains the real PostgreSQL-backed backend
 - `backend-stub/` contains the lightweight fallback/reference backend
+- `dashboard/` contains the React stats frontend
 - `scripts/` contains the Windows startup helpers
 
 ## Requirements
@@ -132,10 +133,10 @@ It provides:
 - ingest routes for plugin heartbeats and finished matches
 - PostgreSQL-backed storage
 - verification routes for local ops/testing
-- public read routes under `/api/v1/public/*` for a future dashboard
+- public read routes under `/api/v1/public/*` for the React dashboard
 - player lifetime stats based on finished match data
 
-This is the backend the future React dashboard should use.
+This is the backend the React dashboard should use.
 
 See [backend-api/README.md](/c:/Users/vkper/Downloads/HuntCore/backend-api/README.md).
 
@@ -164,9 +165,10 @@ start-huntcore.bat
 That launcher can:
 
 - start `backend-api`
+- start the React dashboard
 - wait for backend health
 - launch Paper
-- shut the backend down when Paper exits if the launcher started it
+- shut the backend and dashboard down when Paper exits if the launcher started them
 
 For a reusable local setup, copy:
 
@@ -181,6 +183,12 @@ huntcore-stack.local.ps1
 ```
 
 and fill in your local Paper path, backend port, and PostgreSQL credentials. The local file is git-ignored.
+
+Default local dashboard URL:
+
+```text
+http://127.0.0.1:4173
+```
 
 If you prefer the script directly:
 
@@ -199,21 +207,35 @@ The public read API now lives under:
 - `/api/v1/public/players/{playerName}`
 - `/api/v1/public/players/{playerName}/matches`
 
-These routes are the intended contract for a future React stats dashboard.
+These routes are the intended contract for the React stats dashboard in `dashboard/`.
 
-## Future Frontend Direction
+## Dashboard Frontend
 
-The current plan is:
+Phase 3 now lives in `dashboard/`.
 
-- keep the Java backend separate
-- build a React dashboard against `/api/v1/public/*`
-- target a static host such as Cloudflare Pages for the frontend
+It provides:
+
+- live server overview
+- recent match history
+- player lifetime stats
+- per-player recent match history
+
+The dashboard reads `/api/v1/public/*` directly and is meant to stay a static frontend.
+
+Primary hosting target:
+
+- Cloudflare Pages
+
+Fallback:
+
+- GitHub Pages
 
 Static hosting only solves the frontend. The Java API and PostgreSQL still need their own host.
+
+See [dashboard/README.md](/c:/Users/vkper/Downloads/HuntCore/dashboard/README.md).
 
 ## Current Limitations
 
 - The current match flow supports exactly one runner
 - Deaths and KD are not tracked in backend player stats
-- The React dashboard is not built yet
 - The backend is ready for public read traffic, but final always-on internet hosting is still a separate deployment step

@@ -2,7 +2,7 @@
 
 `backend-api/` is the real PostgreSQL-backed backend for HuntCore.
 
-It accepts plugin ingest writes, stores match/server data, and exposes the public read API that a future React dashboard should consume.
+It accepts plugin ingest writes, stores match/server data, and exposes the public read API that `dashboard/` consumes.
 
 ## What It Does
 
@@ -35,7 +35,7 @@ These are useful for local testing and ops:
 
 ## Public Dashboard Routes
 
-These are the routes a future frontend should consume:
+These are the routes the dashboard frontend should consume:
 
 - `GET /api/v1/public/servers`
 - `GET /api/v1/public/servers/{serverId}`
@@ -103,6 +103,7 @@ start-huntcore.bat
 ```
 
 That launcher starts the backend and Paper together.
+It can also start the React dashboard alongside them when `dashboard/` dependencies are installed.
 
 For a reusable local setup:
 
@@ -126,7 +127,7 @@ You can also call the script directly:
 
 ## Frontend Hosting Direction
 
-The intended next step is a React dashboard hosted separately from this backend.
+The React dashboard now lives in `dashboard/` and is intended to be hosted separately from this backend.
 
 Current target:
 
@@ -135,3 +136,5 @@ Current target:
 - PostgreSQL hosted separately
 
 Static frontend hosting does not replace the Java backend or database.
+
+See [dashboard/README.md](/c:/Users/vkper/Downloads/HuntCore/dashboard/README.md).

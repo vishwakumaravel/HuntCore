@@ -4,11 +4,15 @@ param(
     [string]$BackendProject = "backend-api",
     [string]$JavaHome = $env:JAVA_HOME,
     [int]$BackendPort = 8080,
+    [bool]$DashboardEnabled = $true,
+    [int]$DashboardPort = 4173,
+    [string]$DashboardApiBaseUrl = "",
     [string]$PostgresUrl = "jdbc:postgresql://localhost:5432/huntcore",
     [string]$PostgresUser = "huntcore",
     [string]$PostgresPassword = "huntcore",
     [string]$IngestApiKey = "",
-    [switch]$ShowBackendWindow
+    [switch]$ShowBackendWindow,
+    [switch]$ShowDashboardWindow
 )
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
@@ -32,6 +36,15 @@ if (Test-Path $localSettingsPath) {
         }
         if ($BackendPort -eq 8080 -and $HuntCoreStack.BackendPort) {
             $BackendPort = [int]$HuntCoreStack.BackendPort
+        }
+        if ($DashboardEnabled -eq $true -and $null -ne $HuntCoreStack.DashboardEnabled) {
+            $DashboardEnabled = [bool]$HuntCoreStack.DashboardEnabled
+        }
+        if ($DashboardPort -eq 4173 -and $HuntCoreStack.DashboardPort) {
+            $DashboardPort = [int]$HuntCoreStack.DashboardPort
+        }
+        if ([string]::IsNullOrWhiteSpace($DashboardApiBaseUrl) -and $HuntCoreStack.DashboardApiBaseUrl) {
+            $DashboardApiBaseUrl = $HuntCoreStack.DashboardApiBaseUrl
         }
         if ($PostgresUrl -eq "jdbc:postgresql://localhost:5432/huntcore" -and $HuntCoreStack.PostgresUrl) {
             $PostgresUrl = $HuntCoreStack.PostgresUrl
@@ -85,11 +98,39 @@ function Test-BackendHealth {
     }
 }
 
-function Get-PortConflictDescription {
-    param([int]$Port)
+function Test-HttpEndpoint {
+    param(
+        [int]$Port,
+        [string]$Path = "/",
+        [int]$TimeoutSeconds = 2
+    )
 
     try {
-        $response = Invoke-WebRequest -UseBasicParsing -Uri "http://127.0.0.1:$Port/health" -TimeoutSec 2
+        return Invoke-WebRequest -UseBasicParsing -Uri "http://127.0.0.1:$Port$Path" -TimeoutSec $TimeoutSeconds
+    } catch {
+        return $null
+    }
+}
+
+function Test-DashboardReady {
+    param([int]$Port)
+
+    $response = Test-HttpEndpoint -Port $Port -Path "/"
+    if (-not $response) {
+        return $false
+    }
+
+    return $response.Content -like "*HuntCore Dashboard*"
+}
+
+function Get-PortConflictDescription {
+    param(
+        [int]$Port,
+        [string]$Path = "/health"
+    )
+
+    try {
+        $response = Invoke-WebRequest -UseBasicParsing -Uri "http://127.0.0.1:$Port$Path" -TimeoutSec 2
         $serverHeader = $response.Headers["Server"]
         if ($serverHeader) {
             return "Port $Port is already responding with server '$serverHeader'."
@@ -233,6 +274,69 @@ function Start-ManagedBackendProcess {
     return Start-Process @startProcessArgs
 }
 
+function Resolve-NpmExecutable {
+    $candidatePaths = @(
+        (Join-Path $env:ProgramFiles "nodejs\npm.cmd"),
+        (Join-Path ${env:ProgramFiles(x86)} "nodejs\npm.cmd")
+    ) | Where-Object { $_ }
+
+    foreach ($candidatePath in $candidatePaths) {
+        if (Test-Path $candidatePath) {
+            return $candidatePath
+        }
+    }
+
+    $npmCommand = Get-Command npm.cmd -ErrorAction SilentlyContinue
+    if ($npmCommand) {
+        return $npmCommand.Source
+    }
+
+    return $null
+}
+
+function Start-ManagedDashboardProcess {
+    param(
+        [string]$DashboardDir,
+        [string]$NpmExecutable,
+        [int]$Port,
+        [string]$ApiBaseUrl
+    )
+
+    $logDir = Join-Path $repoRoot "logs"
+    New-Item -ItemType Directory -Force -Path $logDir | Out-Null
+    $dashboardLogPath = Join-Path $logDir "dashboard.log"
+    $nodeBinDir = Split-Path -Parent $NpmExecutable
+
+    Add-Content -Path $dashboardLogPath -Value "Launcher handing off dashboard start at $(Get-Date -Format s)"
+    Add-Content -Path $dashboardLogPath -Value "DashboardDir=$DashboardDir"
+    Add-Content -Path $dashboardLogPath -Value "NpmExecutable=$NpmExecutable"
+    Add-Content -Path $dashboardLogPath -Value "DashboardPort=$Port"
+    Add-Content -Path $dashboardLogPath -Value "ApiBaseUrl=$ApiBaseUrl"
+    Add-Content -Path $dashboardLogPath -Value "NodeBinDir=$nodeBinDir"
+
+    $cmdScript = @(
+        "cd /d ""$DashboardDir""",
+        "set ""PATH=$nodeBinDir;%PATH%""",
+        "set ""VITE_API_BASE_URL=$ApiBaseUrl""",
+        "call ""$NpmExecutable"" run dev -- --host 127.0.0.1 --port $Port >> ""$dashboardLogPath"" 2>&1"
+    ) -join " && "
+
+    $argumentList = @("/d", "/c", $cmdScript)
+
+    $startProcessArgs = @{
+        FilePath = "cmd.exe"
+        WorkingDirectory = $DashboardDir
+        ArgumentList = $argumentList
+        PassThru = $true
+    }
+
+    if (-not $ShowDashboardWindow) {
+        $startProcessArgs.WindowStyle = "Hidden"
+    }
+
+    return Start-Process @startProcessArgs
+}
+
 function Stop-ManagedProcessTree {
     param(
         [System.Diagnostics.Process]$Process,
@@ -302,6 +406,10 @@ if ($configuredBackendPort) {
     $BackendPort = $configuredBackendPort
 }
 
+if ([string]::IsNullOrWhiteSpace($DashboardApiBaseUrl)) {
+    $DashboardApiBaseUrl = "http://127.0.0.1:$BackendPort"
+}
+
 if ($BackendProject -eq "backend-api" -and -not (Test-PostgresReachable -JdbcUrl $PostgresUrl)) {
     $postgresStarted = Try-StartPostgresService
     if ($postgresStarted) {
@@ -315,6 +423,8 @@ if ($BackendProject -eq "backend-api" -and -not (Test-PostgresReachable -JdbcUrl
 
 $backendProcess = $null
 $startedBackendHere = $false
+$dashboardProcess = $null
+$startedDashboardHere = $false
 
 try {
     if (Test-BackendHealth -Port $BackendPort) {
@@ -345,6 +455,48 @@ try {
         }
     }
 
+    if ($DashboardEnabled) {
+        if (Test-DashboardReady -Port $DashboardPort) {
+            Write-Host "Dashboard already responding on port $DashboardPort. Reusing it."
+        } else {
+            $dashboardConflict = Get-PortConflictDescription -Port $DashboardPort -Path "/"
+            if ($dashboardConflict) {
+                Write-Warning "$dashboardConflict The launcher will skip starting the dashboard."
+            } else {
+                $dashboardDir = Join-Path $repoRoot "dashboard"
+                $packageJsonPath = Join-Path $dashboardDir "package.json"
+                $nodeModulesPath = Join-Path $dashboardDir "node_modules"
+                $npmExecutable = Resolve-NpmExecutable
+
+                if (-not (Test-Path $packageJsonPath)) {
+                    Write-Warning "Could not find dashboard\package.json. The launcher will skip starting the dashboard."
+                } elseif (-not $npmExecutable) {
+                    Write-Warning "Could not find npm. Install Node.js to start the dashboard with the launcher."
+                } elseif (-not (Test-Path $nodeModulesPath)) {
+                    Write-Warning "Could not find dashboard\node_modules. Run 'npm install' inside dashboard first, then relaunch."
+                } else {
+                    $dashboardProcess = Start-ManagedDashboardProcess -DashboardDir $dashboardDir -NpmExecutable $npmExecutable -Port $DashboardPort -ApiBaseUrl $DashboardApiBaseUrl
+                    $startedDashboardHere = $true
+
+                    $dashboardReady = $false
+                    for ($attempt = 0; $attempt -lt 30; $attempt++) {
+                        Start-Sleep -Seconds 1
+                        if (Test-DashboardReady -Port $DashboardPort) {
+                            $dashboardReady = $true
+                            break
+                        }
+                    }
+
+                    if ($dashboardReady) {
+                        Write-Host "Dashboard is up on http://127.0.0.1:$DashboardPort"
+                    } else {
+                        Write-Warning "Dashboard did not report ready before Paper launch. Paper will still start. Check logs\dashboard.log for dashboard output."
+                    }
+                }
+            }
+        }
+    }
+
     Write-Host "Launching Paper from $PaperServerDir..."
     Push-Location $PaperServerDir
     try {
@@ -355,6 +507,9 @@ try {
     }
 }
 finally {
+    if ($startedDashboardHere) {
+        Stop-ManagedProcessTree -Process $dashboardProcess -Label "dashboard"
+    }
     if ($startedBackendHere) {
         Stop-ManagedProcessTree -Process $backendProcess -Label $BackendProject
     }
