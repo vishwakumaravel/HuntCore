@@ -2,7 +2,20 @@
 
 `dashboard/` is the React frontend for HuntCore's public stats API.
 
-It consumes the public read routes exposed by `backend-api/`:
+It reads from `backend-api` and shows live state, match history, and player lifetime stats.
+
+## What Works Today
+
+- live server overview
+- recent matches page
+- player leaderboard
+- per-player recent match history
+- local development with Vite
+- Dockerized self-hosted dashboard
+
+## API Contract
+
+The dashboard reads:
 
 - `GET /api/v1/public/servers`
 - `GET /api/v1/public/servers/{serverId}`
@@ -11,9 +24,9 @@ It consumes the public read routes exposed by `backend-api/`:
 - `GET /api/v1/public/players/{playerName}`
 - `GET /api/v1/public/players/{playerName}/matches`
 
-## What It Shows
+## Stats Shown
 
-- live server status
+- live server state
 - active match details when a hunt is running
 - recent match history
 - player lifetime wins, losses, kills, and role splits
@@ -23,10 +36,10 @@ Deaths and KD are intentionally out of scope for this version.
 
 ## Local Development
 
-1. Make sure `backend-api` is running.
-2. Copy `.env.example` to `.env` if you want a different API base URL.
-3. Install dependencies.
-4. Start the Vite dev server.
+1. make sure `backend-api` is running
+2. optionally copy `.env.example` to `.env`
+3. install dependencies
+4. run the dev server
 
 Example:
 
@@ -36,19 +49,7 @@ npm install
 npm run dev
 ```
 
-Or use the repo root launcher:
-
-```text
-start-huntcore.bat
-```
-
-When the dashboard is enabled in `huntcore-stack.local.ps1`, the launcher will start:
-
-- `backend-api`
-- the Vite dashboard dev server
-- Paper
-
-Default API base URL:
+Default local API base URL:
 
 ```text
 http://127.0.0.1:8081
@@ -60,8 +61,37 @@ Override with:
 VITE_API_BASE_URL=https://your-api-host.example.com
 ```
 
-The dashboard also supports runtime config for Dockerized/self-hosted deployments.
-It will use `window.__HUNTCORE_CONFIG__.apiBaseUrl` first and fall back to `VITE_API_BASE_URL`.
+## Runtime Config
+
+The dashboard supports two API-base paths:
+
+1. `window.__HUNTCORE_CONFIG__.apiBaseUrl`
+2. `VITE_API_BASE_URL`
+
+That means:
+
+- Docker/self-hosted mode can inject the API URL at container startup
+- static-hosted mode can use the build-time Vite env var
+
+## Local Launchers
+
+Without Docker:
+
+```text
+start-huntcore.bat
+```
+
+With Docker:
+
+```text
+start-huntcore-docker.bat
+```
+
+To stop the Docker services afterward:
+
+```text
+stop-huntcore-docker.bat
+```
 
 ## Build
 
@@ -70,28 +100,16 @@ cd dashboard
 npm run build
 ```
 
-The build script also writes `dist/404.html` so GitHub Pages can serve the SPA shell on deep links.
+The build script also writes `dist/404.html` so GitHub Pages-style SPA fallback works.
 
 ## Docker
 
-The repo root now includes a Docker Compose path that serves the built dashboard from a lightweight web server container.
+The repo includes a Dockerized dashboard path served by nginx.
 
-Default local dashboard URL:
+Default local URL:
 
 ```text
 http://127.0.0.1:4173
-```
-
-If you want Docker plus Paper together in one command, use:
-
-```text
-start-huntcore-docker.bat
-```
-
-To stop the Docker services afterward, use:
-
-```text
-stop-huntcore-docker.bat
 ```
 
 The container reads:
@@ -100,30 +118,24 @@ The container reads:
 HUNTCORE_DASHBOARD_API_BASE_URL
 ```
 
-at startup and writes `runtime-config.js`, so you can point the same image at a different backend without rebuilding it.
+at startup and writes `runtime-config.js`, so the same image can point at different backend URLs without rebuilding.
 
-## Hosting Direction
+## Hosting Status
 
-Primary target:
+What is ready:
 
-- Cloudflare Pages Free
+- local dev
+- local Windows launcher
+- Dockerized self-hosting
 
-Why:
+What is not fully finished:
 
-- static hosting works well for a React SPA
-- `_redirects` in `public/` supports BrowserRouter-style routes cleanly
-- it pairs well with a separately hosted Java API
-
-Fallback:
-
-- GitHub Pages
-
-The frontend can be static-hosted for free, but it still depends on an always-on `backend-api` and PostgreSQL somewhere else.
+- final public Cloudflare Pages deployment
+- final public backend exposure and production CORS/domain setup
 
 ## Static Hosting Notes
 
-- `public/_redirects` is included for Cloudflare Pages SPA routing
-- `public/runtime-config.js` provides a safe empty default for static hosts and local dev
+- `public/_redirects` supports Cloudflare Pages SPA routing
+- `public/runtime-config.js` provides a safe empty default
 - `scripts/postbuild.mjs` copies `index.html` to `404.html` for GitHub Pages fallback behavior
-- set `HUNTCORE_DASHBOARD_BASE_PATH=/your-repo-name/` before `npm run build` if you deploy to a GitHub Pages project site instead of a root domain
-- set `HUNTCORE_PUBLIC_ALLOWED_ORIGIN` on `backend-api` to your deployed frontend origin when you publish publicly
+- `HUNTCORE_DASHBOARD_BASE_PATH` can be used for subpath deployments such as GitHub Pages project sites

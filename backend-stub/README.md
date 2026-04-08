@@ -1,23 +1,25 @@
 # HuntCore Backend Stub
 
-`backend-stub/` is the lightweight reference backend for HuntCore.
+`backend-stub/` is the tiny reference backend for HuntCore.
 
-It exists mainly for:
+It exists for quick local testing when you do not want PostgreSQL or the full real backend.
 
-- quick local contract testing
-- debugging plugin sync without PostgreSQL
-- keeping a tiny fallback implementation around
+## What It Is Good For
+
+- lightweight plugin contract testing
+- quick debugging of plugin sync
+- keeping a minimal fallback implementation around
 
 It is not the long-term production backend. `backend-api/` is the real path forward.
 
-## What It Supports
+## Supported Routes
 
 Plugin ingest routes:
 
 - `PUT /api/v1/servers/{serverId}/heartbeat`
 - `POST /api/v1/matches`
 
-Simple inspection routes:
+Inspection routes:
 
 - `GET /health`
 - `GET /api/v1/servers`
@@ -69,22 +71,21 @@ Default persisted file:
 data/matches.log
 ```
 
-Notes:
-
-- format is internal to the stub
-- persisted matches reload on startup
-- heartbeats do not reload on startup
+Persisted matches reload on startup.
+Heartbeats do not reload on startup.
 
 ## When To Use It
 
 Use `backend-stub/` if you want:
 
 - the smallest possible local backend
-- no PostgreSQL setup
-- quick API contract checks
+- no PostgreSQL
+- a quick sync/debug target
 
 Use `backend-api/` if you want:
 
-- real persisted backend data
+- real persistence
 - player lifetime stats
-- public read endpoints for a future dashboard
+- dashboard support
+- Docker deployment
+- the main project architecture

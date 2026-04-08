@@ -1,49 +1,79 @@
 # HuntCore
 
-HuntCore is a Paper plugin for a polished manhunt server loop: one runner, one or more hunters, fresh temporary match worlds, portal-aware tracking, persistent pause/resume, a configurable parkour waiting lobby, and a separate PvP arena side mode.
+HuntCore is a Paper plugin for a polished manhunt server loop, plus the backend and frontend pieces needed to collect live stats and show them on a dashboard.
 
-The repo now contains the gameplay plugin plus the backend and frontend pieces needed for live stats and a public dashboard.
+Today, the project includes:
 
-## What Is In This Repo
+- the Paper gameplay plugin
+- a real Java/PostgreSQL backend API
+- a React dashboard
+- Docker support for the stats stack
+- GitHub Actions CI and image publishing
 
-- `src/` contains the Paper plugin
-- `backend-api/` contains the real PostgreSQL-backed backend
-- `backend-stub/` contains the lightweight fallback/reference backend
-- `dashboard/` contains the React stats frontend
-- `scripts/` contains the Windows startup helpers
-- `.github/workflows/` contains CI and image publishing workflows
+## What Works Today
+
+These pieces are built and working:
+
+- gameplay runs locally in Paper as the authority
+- local YAML match data still works as before
+- backend sync is optional and non-blocking
+- finalized matches and heartbeats can be sent to `backend-api`
+- `backend-api` stores data in PostgreSQL
+- public read routes under `/api/v1/public/*` power the dashboard
+- the React dashboard shows:
+  - live server overview
+  - recent matches
+  - player lifetime wins, losses, kills, and role splits
+  - per-player recent match history
+- the stats stack can run either:
+  - with the local Windows launcher
+  - with Docker Compose
+- GitHub Actions builds the plugin, backend, dashboard, and validates Docker images
+
+Cloudflare Pages or Cloudflare Tunnel are optional next steps, not required for the project to be complete.
+
+## Repo Layout
+
+- `src/` Paper plugin
+- `backend-api/` real PostgreSQL-backed backend
+- `backend-stub/` lightweight fallback/reference backend
+- `dashboard/` React frontend
+- `scripts/` Windows launcher scripts
+- `.github/workflows/` CI and image publishing
+
+## Architecture
+
+The system works like this:
+
+1. Paper runs HuntCore gameplay locally.
+2. If backend sync is enabled, the plugin sends heartbeats and finalized match results to `backend-api`.
+3. `backend-api` stores the data in PostgreSQL.
+4. `dashboard/` reads the public API and renders live server state, matches, and player stats.
+
+Important design choice:
+
+- gameplay remains local-authoritative
+- backend sync is best-effort only
+- if the backend is down, gameplay should still continue normally
 
 ## Requirements
 
 - Java 21
 - Paper for Minecraft 1.21.x
-- PostgreSQL if you want to use `backend-api`
+- PostgreSQL for `backend-api`
+- Node.js for dashboard local development
+- Docker Desktop if you want the Docker deployment path
 
 Paper setup guide:
 https://docs.papermc.io/paper/dev/project-setup
 
-## Gameplay Highlights
+## Plugin Build And Install
 
-- One runner versus one or more hunters
-- Infinite hunter respawns
-- Fresh temporary overworld, Nether, and End per round
-- Runner wins by killing the Ender Dragon in the fresh match End
-- Cross-dimension hunter compass tracking with portal memory
-- Spectator mode that stays out of ready checks and win conditions
-- Persistent `/pause` and `/unpause`, including clean server restart resume
-- Prescouted match-world cache with nearby POI selection
-- Importable waiting-lobby maps and PvP arena maps from `.zip` worlds
-- In-game `/huntstatus` and `/matchstats`
-
-## Build The Plugin
-
-From the project root:
+Build from the repo root:
 
 ```powershell
 .\gradlew.bat build
 ```
-
-Use Java 21 for local builds. The current Gradle setup is not reliable under Java 25 yet.
 
 Output jar:
 
@@ -51,53 +81,54 @@ Output jar:
 build/libs/HuntCore-2.0.0-SNAPSHOT.jar
 ```
 
-## Install The Plugin
+Install:
 
-1. Build the jar.
-2. Copy `build/libs/HuntCore-2.0.0-SNAPSHOT.jar` into your Paper server `plugins/` folder.
-3. Start the server once so `plugins/HuntCore/config.yml` is generated.
-4. Adjust config values if needed.
-5. Restart the server.
+1. copy the jar into your Paper server `plugins/` folder
+2. start Paper once so `plugins/HuntCore/config.yml` is generated
+3. edit config as needed
+4. restart Paper
 
-## Commands
+Use Java 21 for local builds. The current Gradle setup is not reliable under Java 25.
+
+## Gameplay Commands
 
 Public commands:
 
-- `/runner` select the runner role
-- `/hunter` select the hunter role
-- `/spectate` toggle spectator mode
-- `/ready` mark yourself ready
-- `/unready` remove your ready status
-- `/reset` return to the waiting lobby spawn
-- `/quit` leave the current match, forfeit, and return to the waiting lobby
-- `/pvp` enter the PvP arena
-- `/pvpleave` leave the PvP arena and restore your previous state
-- `/huntstatus` show current lobby, cache, and match status
-- `/matchstats [1-10]` show recent recorded match results
+- `/runner`
+- `/hunter`
+- `/spectate`
+- `/ready`
+- `/unready`
+- `/reset`
+- `/quit`
+- `/pvp`
+- `/pvpleave`
+- `/huntstatus`
+- `/matchstats [1-10]`
 
 Admin commands:
 
-- `/hunterkeepinventory <on|off|toggle|status>` toggle hunter keep-inventory behavior
-- `/setlobby` save your current location as the waiting lobby spawn
-- `/setpvpspawn` save your current location as the PvP arena spawn
-- `/pause` pause the current match
-- `/unpause` resume a paused match when the runner and at least one hunter are online
-- `/installlobbymap [zip-path] [world-name]` import a dedicated waiting-lobby world
-- `/installpvpmap [zip-path] [world-name]` import a dedicated PvP arena world
+- `/hunterkeepinventory <on|off|toggle|status>`
+- `/setlobby`
+- `/setpvpspawn`
+- `/pause`
+- `/unpause`
+- `/installlobbymap [zip-path] [world-name]`
+- `/installpvpmap [zip-path] [world-name]`
 
 ## Match Data On Disk
 
-The plugin still keeps its local YAML data:
+The plugin still keeps its normal local YAML files:
 
 - `plugins/HuntCore/match-history.yml`
 - `plugins/HuntCore/prepared-matches.yml`
 - `plugins/HuntCore/paused-match.yml`
 
-Those files remain part of the normal gameplay flow even when backend sync is enabled.
+Those remain part of normal gameplay even when backend sync is enabled.
 
-## Optional Backend Sync
+## Backend Sync
 
-HuntCore can push best-effort backend updates without affecting gameplay.
+Backend sync is optional and disabled by default.
 
 Config block:
 
@@ -111,152 +142,84 @@ backend:
   timeout-ms: 3000
 ```
 
-Plugin-side write endpoints:
+Plugin write endpoints:
 
 - `PUT /api/v1/servers/{serverId}/heartbeat`
 - `POST /api/v1/matches`
 
-Behavior notes:
+Behavior:
 
-- backend sync is optional and disabled by default
-- gameplay remains local-authoritative if the backend is down
+- gameplay keeps working if the backend is disabled or unreachable
 - local YAML match history still writes as before
-- if another local web server already uses `8080`, point HuntCore at another port such as `8081`
+- the main outbound write for v1 is finalized match data
 
-## Backend Options
+## Run Modes
 
-### `backend-api/`
+### 1. Plugin Only
 
-This is the real backend.
+Use this if you only want HuntCore gameplay:
 
-It provides:
+- run Paper normally
+- leave `backend.enabled: false`
 
-- ingest routes for plugin heartbeats and finished matches
-- PostgreSQL-backed storage
-- verification routes for local ops/testing
-- public read routes under `/api/v1/public/*` for the React dashboard
-- player lifetime stats based on finished match data
+### 2. Local Windows Stack
 
-This is the backend the React dashboard should use.
-
-See [backend-api/README.md](/c:/Users/vkper/Downloads/HuntCore/backend-api/README.md).
-
-### `backend-stub/`
-
-This is the lightweight fallback/reference backend.
-
-It is still useful for:
-
-- very lightweight local contract testing
-- debugging plugin sync without PostgreSQL
-- keeping a minimal reference implementation around
-
-It is not the long-term production path.
-
-See [backend-stub/README.md](/c:/Users/vkper/Downloads/HuntCore/backend-stub/README.md).
-
-## Local Startup
-
-For the closest replacement to the old one-click `start.bat` workflow, use:
+Use this if you want Paper plus the local backend and dashboard without Docker:
 
 ```text
 start-huntcore.bat
 ```
 
-That launcher can:
+This launcher can start:
 
-- start `backend-api`
-- start the React dashboard
-- wait for backend health
-- launch Paper
-- shut the backend and dashboard down when Paper exits if the launcher started them
+- `backend-api`
+- the React dashboard dev server
+- Paper
 
-For a reusable local setup, copy:
+It uses `huntcore-stack.local.ps1` for your local machine-specific settings.
 
-```text
-huntcore-stack.local.example.ps1
-```
+### 3. Docker Stats Stack
 
-to:
-
-```text
-huntcore-stack.local.ps1
-```
-
-and fill in your local Paper path, backend port, and PostgreSQL credentials. The local file is git-ignored.
-
-Default local dashboard URL:
-
-```text
-http://127.0.0.1:4173
-```
-
-## Docker Startup
-
-For a one-command Docker-backed startup, use:
-
-```text
-start-huntcore-docker.bat
-```
-
-That launcher will:
-
-- start or refresh `postgres`, `backend-api`, and `dashboard` with Docker Compose
-- wait for backend and dashboard readiness
-- launch Paper afterward
-
-When Paper exits, the Docker services stay running by default so the dashboard and backend can remain available.
-
-To stop the Docker services later, use:
-
-```text
-stop-huntcore-docker.bat
-```
-
-If you want a full teardown instead of a stop, run:
-
-```powershell
-.\scripts\stop-huntcore-docker-stack.ps1 -Down
-```
-
-If you prefer the script directly:
-
-```powershell
-.\scripts\start-huntcore-stack.ps1
-```
-
-## Docker Deployment
-
-The repo now includes a Docker deployment path for the stats stack:
+Use this if you want a more repeatable deploy path for:
 
 - `postgres`
 - `backend-api`
 - `dashboard`
 
-Paper stays outside Docker in this phase so your live gameplay setup does not have to change.
+while keeping Paper outside Docker.
 
-Quick start:
-
-1. Copy `.env.example` to `.env`
-2. Adjust database password, allowed origin, and dashboard API URL if needed
-3. Start the stack
+Manual Docker start:
 
 ```powershell
 docker compose up -d --build
 ```
 
-Default local container URLs:
+One-click Docker + Paper start:
+
+```text
+start-huntcore-docker.bat
+```
+
+Stop Docker services later:
+
+```text
+stop-huntcore-docker.bat
+```
+
+Or full teardown:
+
+```powershell
+.\scripts\stop-huntcore-docker-stack.ps1 -Down
+```
+
+Default local URLs:
 
 - backend API: `http://127.0.0.1:8081`
 - dashboard: `http://127.0.0.1:4173`
 
-If you want Docker plus Paper together in one step, use `start-huntcore-docker.bat` instead of running Compose and Paper separately.
-
-For a deployed Paper server, point HuntCore's `backend.base-url` at the Dockerized backend URL instead of your local Windows launcher port.
-
 ## Public Stats API
 
-The public read API now lives under:
+The public dashboard routes live under:
 
 - `/api/v1/public/servers`
 - `/api/v1/public/servers/{serverId}`
@@ -265,62 +228,93 @@ The public read API now lives under:
 - `/api/v1/public/players/{playerName}`
 - `/api/v1/public/players/{playerName}/matches`
 
-These routes are the intended contract for the React stats dashboard in `dashboard/`.
+These power the dashboard and are the main frontend contract.
 
-## Dashboard Frontend
+## Docker
 
-Phase 3 now lives in `dashboard/`.
+The repo includes:
 
-It provides:
+- `docker-compose.yml`
+- `backend-api/Dockerfile`
+- `dashboard/Dockerfile`
+- `.env.example`
 
-- live server overview
-- recent match history
-- player lifetime stats
-- per-player recent match history
+Quick start:
 
-The dashboard reads `/api/v1/public/*` directly and is meant to stay a static frontend.
+1. copy `.env.example` to `.env`
+2. fill in database password and local ports
+3. run:
 
-Primary hosting target:
+```powershell
+docker compose up -d --build
+```
 
-- Cloudflare Pages
-
-Fallback:
-
-- GitHub Pages
-
-Static hosting only solves the frontend. The Java API and PostgreSQL still need their own host.
-
-See [dashboard/README.md](/c:/Users/vkper/Downloads/HuntCore/dashboard/README.md).
+Paper still runs separately and should point to the backend URL exposed by Docker.
 
 ## GitHub Actions
 
-The repo now includes GitHub Actions for:
-
-- plugin CI build
-- backend API CI build
-- dashboard CI build
-- Docker image build validation
-- GHCR image publishing on tags or manual dispatch
-
-Workflow files:
+The repo includes:
 
 - `.github/workflows/ci.yml`
 - `.github/workflows/publish-images.yml`
 
-The workflows publish:
+What CI does:
+
+- builds the plugin
+- builds the backend
+- builds the dashboard
+- validates Docker images
+- uploads build artifacts
+
+What publish does:
+
+- publishes backend and dashboard images to GHCR on tags or manual dispatch
+
+Current image names:
 
 - `ghcr.io/<owner>/huntcore-backend-api`
 - `ghcr.io/<owner>/huntcore-dashboard`
 
-Deployment is still manual:
+Deployment is still manual.
 
-```powershell
-docker compose pull
-docker compose up -d
-```
+## Backend Choices
+
+### `backend-api/`
+
+This is the real backend and the main path forward.
+
+Use it if you want:
+
+- PostgreSQL persistence
+- player lifetime stats
+- dashboard support
+- Docker deployment
+
+### `backend-stub/`
+
+This is the tiny fallback/reference backend.
+
+Use it if you want:
+
+- the smallest possible local contract test
+- no PostgreSQL
+- quick sync debugging
+
+## Frontend Hosting
+
+The dashboard is already usable locally and through Docker.
+
+Planned external hosting direction:
+
+- Cloudflare Pages for the static frontend
+- separately hosted `backend-api`
+- separately hosted PostgreSQL
+
+That is optional polish, not required for the project to function today.
 
 ## Current Limitations
 
-- The current match flow supports exactly one runner
-- Deaths and KD are not tracked in backend player stats
-- The backend is ready for public read traffic, but final always-on internet hosting is still a separate deployment step
+- the current match flow supports exactly one runner
+- deaths and KD are not tracked in backend player stats
+- the dashboard depends on `backend-api`; it is not a standalone offline UI
+- public internet hosting is not fully finished yet

@@ -2,31 +2,43 @@
 
 `backend-api/` is the real PostgreSQL-backed backend for HuntCore.
 
-It accepts plugin ingest writes, stores match/server data, and exposes the public read API that `dashboard/` consumes.
+It receives plugin sync data, stores it, and exposes the public read API that the dashboard uses.
 
-## What It Does
+## What Works Today
 
-- stores the latest heartbeat per HuntCore server
-- stores finalized matches
-- stores per-player per-match rows for lifetime stats
-- exposes local verification routes
-- exposes public read routes for dashboard use
+- heartbeat ingest
+- finalized match ingest
+- PostgreSQL persistence
+- public read routes for:
+  - live server state
+  - recent matches
+  - player lifetime stats
+  - per-player recent match history
+- Docker packaging
+
+## Main Responsibilities
+
+- store the latest heartbeat for each HuntCore server
+- store finalized matches
+- store per-player per-match rows for stats aggregation
+- expose local verification routes
+- expose public read routes for the dashboard
 
 ## Requirements
 
 - Java 21
 - PostgreSQL
 
-## Plugin Ingest Routes
+## Write Routes
+
+These are written to by the Paper plugin:
 
 - `PUT /api/v1/servers/{serverId}/heartbeat`
 - `POST /api/v1/matches`
 
-These routes are written to by the Paper plugin, not by the browser dashboard.
-
 ## Verification Routes
 
-These are useful for local testing and ops:
+Useful for local testing and troubleshooting:
 
 - `GET /health`
 - `GET /api/v1/servers`
@@ -35,7 +47,7 @@ These are useful for local testing and ops:
 
 ## Public Dashboard Routes
 
-These are the routes the dashboard frontend should consume:
+These are the dashboard-facing read routes:
 
 - `GET /api/v1/public/servers`
 - `GET /api/v1/public/servers/{serverId}`
@@ -44,16 +56,16 @@ These are the routes the dashboard frontend should consume:
 - `GET /api/v1/public/players/{playerName}`
 - `GET /api/v1/public/players/{playerName}/matches?limit=50&offset=0`
 
-Current public stats include:
+Current stats include:
 
 - live server state
 - latest completed match
 - recent matches
-- player lifetime wins/losses/kills
+- player lifetime wins, losses, kills
 - runner vs hunter role splits
 - per-player recent match history
 
-Deaths and KD are intentionally out of scope for now.
+Deaths and KD are intentionally out of scope right now.
 
 ## Configuration
 
@@ -72,15 +84,15 @@ Defaults:
 - datasource URL: `jdbc:postgresql://localhost:5432/huntcore`
 - datasource username: `huntcore`
 - datasource password: `huntcore`
-- public allowed origin: `*`
-- public stale threshold: `90`
+- allowed origin: `*`
+- stale threshold: `90`
 - port: `8080`
 
-If another local web server already uses `8080`, set `SERVER_PORT=8081` and point HuntCore's `backend.base-url` at `http://127.0.0.1:8081`.
+If another local web server already uses `8080`, run this backend on `8081` and point HuntCore at `http://127.0.0.1:8081`.
 
-## Run
+## Local Run
 
-From the repo root with Java 21:
+From the repo root:
 
 ```powershell
 .\gradlew.bat -p backend-api bootRun
@@ -96,28 +108,23 @@ Flyway migrations run automatically on startup.
 
 ## Docker
 
-The repo root now includes a `docker-compose.yml` that runs:
+The repo root Docker stack includes:
 
 - `postgres`
 - `backend-api`
 - `dashboard`
 
-Local Docker defaults:
-
-- external backend port: `8081`
-- container backend port: `8080`
-
-Quick start from the repo root:
+Quick start:
 
 1. copy `.env.example` to `.env`
-2. adjust database credentials if needed
-3. start the stack
+2. adjust credentials if needed
+3. run:
 
 ```powershell
 docker compose up -d --build
 ```
 
-Or use the combined launcher from the repo root:
+Convenience launcher:
 
 ```text
 start-huntcore-docker.bat
@@ -130,57 +137,27 @@ docker compose ps
 curl http://127.0.0.1:8081/health
 ```
 
-The Docker image reads the same backend environment variables listed above.
+## Local Windows Launcher
 
-## One-Click Local Startup
-
-The simplest local Windows flow is:
+If you are not using Docker, the local launcher path is:
 
 ```text
 start-huntcore.bat
 ```
 
-That launcher starts the backend and Paper together.
-It can also start the React dashboard alongside them when `dashboard/` dependencies are installed.
+That path starts the backend locally alongside Paper and optionally the dashboard dev server.
 
-For a reusable local setup:
+## Deployment Status
 
-1. copy `huntcore-stack.local.example.ps1` to `huntcore-stack.local.ps1`
-2. fill in your Paper path, backend port, and PostgreSQL credentials
-3. use `start-huntcore.bat`
+What is done:
 
-You can also call the script directly:
+- backend is containerized
+- Docker Compose works locally
+- GitHub Actions builds and validates it
+- GHCR publishing workflow exists
 
-```powershell
-.\scripts\start-huntcore-stack.ps1
-```
+What is not fully finished:
 
-## Public API Notes
-
-- `/api/v1/public/*` is intentionally read-only
-- public routes are currently unauthenticated by design
-- CORS defaults to `*` for easy local development
-- set `HUNTCORE_PUBLIC_ALLOWED_ORIGIN` to your future frontend domain when you deploy publicly
-- `isOnline` is derived from the age of the latest heartbeat
-
-## Frontend Hosting Direction
-
-The React dashboard now lives in `dashboard/` and is intended to be hosted separately from this backend.
-
-Current target:
-
-- frontend on a static host such as Cloudflare Pages
-- backend-api hosted separately
-- PostgreSQL hosted separately
-
-Static frontend hosting does not replace the Java backend or database.
-
-See [dashboard/README.md](/c:/Users/vkper/Downloads/HuntCore/dashboard/README.md).
-
-## GitHub Container Registry
-
-GitHub Actions can build and publish the backend image to:
-
-- `ghcr.io/<owner>/huntcore-backend-api`
-
-See `.github/workflows/publish-images.yml` in the repo root.
+- always-on public hosting
+- Cloudflare Tunnel or another public backend exposure path
+- final public production domain setup
