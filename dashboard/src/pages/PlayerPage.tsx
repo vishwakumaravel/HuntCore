@@ -3,7 +3,7 @@ import { Link, useParams } from "react-router-dom";
 import { ApiError, publicApi } from "../api";
 import { EmptyState } from "../components/EmptyState";
 import { StatCard } from "../components/StatCard";
-import { formatDateTime, formatPercent } from "../lib/format";
+import { formatCountLabel, formatDateTime, formatPercent } from "../lib/format";
 
 export function PlayerPage() {
   const { playerName } = useParams<{ playerName: string }>();
@@ -89,14 +89,14 @@ export function PlayerPage() {
           <StatCard accent="cool" label="Kills" value={player.kills} />
           <StatCard label="Win rate" value={formatPercent(player.winRatePercent)} />
           <StatCard
-            detail="wins / matches"
-            label="Runner record"
-            value={`${player.runnerWins}/${player.runnerMatches}`}
+            detail={`${formatCountLabel(player.runnerWins, "runner win")}`}
+            label="Runner matches"
+            value={formatCountLabel(player.runnerMatches, "runner match")}
           />
           <StatCard
-            detail="wins / matches"
-            label="Hunter record"
-            value={`${player.hunterWins}/${player.hunterMatches}`}
+            detail={`${formatCountLabel(player.hunterWins, "hunter win")}`}
+            label="Hunter matches"
+            value={formatCountLabel(player.hunterMatches, "hunter match")}
           />
         </div>
       </section>

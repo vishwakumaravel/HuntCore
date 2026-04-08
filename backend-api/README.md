@@ -94,6 +94,44 @@ Or build:
 
 Flyway migrations run automatically on startup.
 
+## Docker
+
+The repo root now includes a `docker-compose.yml` that runs:
+
+- `postgres`
+- `backend-api`
+- `dashboard`
+
+Local Docker defaults:
+
+- external backend port: `8081`
+- container backend port: `8080`
+
+Quick start from the repo root:
+
+1. copy `.env.example` to `.env`
+2. adjust database credentials if needed
+3. start the stack
+
+```powershell
+docker compose up -d --build
+```
+
+Or use the combined launcher from the repo root:
+
+```text
+start-huntcore-docker.bat
+```
+
+Useful checks:
+
+```powershell
+docker compose ps
+curl http://127.0.0.1:8081/health
+```
+
+The Docker image reads the same backend environment variables listed above.
+
 ## One-Click Local Startup
 
 The simplest local Windows flow is:
@@ -138,3 +176,11 @@ Current target:
 Static frontend hosting does not replace the Java backend or database.
 
 See [dashboard/README.md](/c:/Users/vkper/Downloads/HuntCore/dashboard/README.md).
+
+## GitHub Container Registry
+
+GitHub Actions can build and publish the backend image to:
+
+- `ghcr.io/<owner>/huntcore-backend-api`
+
+See `.github/workflows/publish-images.yml` in the repo root.

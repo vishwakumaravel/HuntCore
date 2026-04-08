@@ -1,0 +1,69 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-huntcore}
+      POSTGRES_USER: ${POSTGRES_USER:-huntcore}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-huntcore}
+    volumes:
+      - huntcore-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - pg_isready -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+    restart: unless-stopped
+
+  backend-api:
+    build:
+      context: .
+      dockerfile: backend-api/Dockerfile
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-huntcore}
+      SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER:-huntcore}
+      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:-huntcore}
+      HUNTCORE_INGEST_API_KEY: ${HUNTCORE_INGEST_API_KEY:-}
+      HUNTCORE_PUBLIC_ALLOWED_ORIGIN: ${HUNTCORE_PUBLIC_ALLOWED_ORIGIN:-http://localhost:4173}
+      HUNTCORE_PUBLIC_STALE_THRESHOLD_SECONDS: ${HUNTCORE_PUBLIC_STALE_THRESHOLD_SECONDS:-90}
+      SERVER_PORT: 8080
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - curl -fsS http://127.0.0.1:8080/health > /dev/null || exit 1
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    ports:
+      - "${BACKEND_PORT:-8081}:8080"
+    restart: unless-stopped
+
+  dashboard:
+    build:
+      context: .
+      dockerfile: dashboard/Dockerfile
+    environment:
+      HUNTCORE_DASHBOARD_API_BASE_URL: ${HUNTCORE_DASHBOARD_API_BASE_URL:-http://localhost:8081}
+    depends_on:
+      backend-api:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - wget -qO- http://127.0.0.1/runtime-config.js > /dev/null || exit 1
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    ports:
+      - "${DASHBOARD_PORT:-4173}:80"
+    restart: unless-stopped
+
+volumes:
+  huntcore-postgres-data:

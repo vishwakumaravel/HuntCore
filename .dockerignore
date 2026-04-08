@@ -1,0 +1,17 @@
+.git
+.gradle
+.gradle-temp
+.vscode
+bin
+build
+logs
+.env
+huntcore-stack.local.ps1
+backend-api/build
+backend-stub/build
+dashboard/node_modules
+dashboard/dist
+dashboard/.env
+dashboard/*.tsbuildinfo
+dashboard/vite.config.js
+dashboard/vite.config.d.ts

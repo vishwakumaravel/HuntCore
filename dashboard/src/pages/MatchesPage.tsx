@@ -86,14 +86,6 @@ export function MatchesPage() {
                       {match.poiName} ({match.poiDistanceBlocks} blocks)
                     </dd>
                   </div>
-                  <div>
-                    <dt>Server</dt>
-                    <dd>{match.serverId}</dd>
-                  </div>
-                  <div>
-                    <dt>World</dt>
-                    <dd>{match.matchWorldBaseName}</dd>
-                  </div>
                 </dl>
               </div>
 
@@ -109,24 +101,26 @@ export function MatchesPage() {
         </div>
       </section>
 
-      <section className="pagination-row">
-        <button
-          className="action-button"
-          disabled={offset === 0}
-          onClick={() => setOffset((current) => Math.max(0, current - PAGE_SIZE))}
-          type="button"
-        >
-          Previous
-        </button>
-        <button
-          className="action-button"
-          disabled={offset + PAGE_SIZE >= total}
-          onClick={() => setOffset((current) => current + PAGE_SIZE)}
-          type="button"
-        >
-          Next
-        </button>
-      </section>
+      {total > PAGE_SIZE ? (
+        <section className="pagination-row">
+          <button
+            className="action-button"
+            disabled={offset === 0}
+            onClick={() => setOffset((current) => Math.max(0, current - PAGE_SIZE))}
+            type="button"
+          >
+            Previous
+          </button>
+          <button
+            className="action-button"
+            disabled={offset + PAGE_SIZE >= total}
+            onClick={() => setOffset((current) => current + PAGE_SIZE)}
+            type="button"
+          >
+            Next
+          </button>
+        </section>
+      ) : null}
     </div>
   );
 }

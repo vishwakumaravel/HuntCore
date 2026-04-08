@@ -9,4 +9,10 @@ $HuntCoreStack = @{
     PostgresUser = "postgres"
     PostgresPassword = "replace-me"
     IngestApiKey = ""
+    DockerComposeFile = "docker-compose.yml"
+    DockerEnvFile = ".env"
+    DockerBackendPort = 8081
+    DockerDashboardPort = 4173
+    DockerBuildOnStart = $true
+    DockerStopOnExit = $false
 }

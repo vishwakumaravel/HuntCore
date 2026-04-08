@@ -20,12 +20,25 @@ const routerBase =
     ? import.meta.env.BASE_URL
     : undefined;
 
-ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
-  <React.StrictMode>
-    <QueryClientProvider client={queryClient}>
-      <BrowserRouter basename={routerBase}>
-        <App />
-      </BrowserRouter>
-    </QueryClientProvider>
-  </React.StrictMode>
-);
+function loadRuntimeConfig(): Promise<void> {
+  return new Promise((resolve) => {
+    const script = document.createElement("script");
+    script.src = `${import.meta.env.BASE_URL}runtime-config.js`;
+    script.async = false;
+    script.onload = () => resolve();
+    script.onerror = () => resolve();
+    document.head.appendChild(script);
+  });
+}
+
+loadRuntimeConfig().finally(() => {
+  ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
+    <React.StrictMode>
+      <QueryClientProvider client={queryClient}>
+        <BrowserRouter basename={routerBase}>
+          <App />
+        </BrowserRouter>
+      </QueryClientProvider>
+    </React.StrictMode>
+  );
+});

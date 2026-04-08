@@ -19,12 +19,18 @@ export class ApiError extends Error {
   }
 }
 
-const apiBaseUrl = (
-  import.meta.env.VITE_API_BASE_URL?.trim() || DEFAULT_API_BASE_URL
-).replace(/\/+$/, "");
+function getApiBaseUrl(): string {
+  const runtimeApiBaseUrl = window.__HUNTCORE_CONFIG__?.apiBaseUrl?.trim();
+
+  return (
+    runtimeApiBaseUrl ||
+    import.meta.env.VITE_API_BASE_URL?.trim() ||
+    DEFAULT_API_BASE_URL
+  ).replace(/\/+$/, "");
+}
 
 async function fetchJson<T>(path: string): Promise<T> {
-  const response = await fetch(`${apiBaseUrl}${path}`);
+  const response = await fetch(`${getApiBaseUrl()}${path}`);
   if (!response.ok) {
     throw new ApiError(response.status, `Request failed with ${response.status}`);
   }
@@ -32,7 +38,9 @@ async function fetchJson<T>(path: string): Promise<T> {
 }
 
 export const publicApi = {
-  apiBaseUrl,
+  get apiBaseUrl(): string {
+    return getApiBaseUrl();
+  },
   getServers(): Promise<ServerListResponse> {
     return fetchJson<ServerListResponse>("/api/v1/public/servers");
   },

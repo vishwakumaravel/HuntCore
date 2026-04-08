@@ -3,7 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { publicApi } from "../api";
 import { EmptyState } from "../components/EmptyState";
-import { formatPercent } from "../lib/format";
+import { formatPercent, formatRoleSummary } from "../lib/format";
 import type { PlayerSort } from "../types";
 
 const PAGE_SIZE = 50;
@@ -99,8 +99,7 @@ export function PlayersPage() {
                 <th>Losses</th>
                 <th>Kills</th>
                 <th>Win rate</th>
-                <th>Runner</th>
-                <th>Hunters</th>
+                <th>Role split</th>
               </tr>
             </thead>
             <tbody>
@@ -116,12 +115,7 @@ export function PlayersPage() {
                   <td>{player.losses}</td>
                   <td>{player.kills}</td>
                   <td>{formatPercent(player.winRatePercent)}</td>
-                  <td>
-                    {player.runnerWins}/{player.runnerMatches}
-                  </td>
-                  <td>
-                    {player.hunterWins}/{player.hunterMatches}
-                  </td>
+                  <td>{formatRoleSummary(player.runnerMatches, player.hunterMatches)}</td>
                 </tr>
               ))}
             </tbody>

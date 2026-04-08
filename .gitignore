@@ -6,5 +6,10 @@ out/
 bin/
 huntcore-stack.local.ps1
 logs/
+.env
 dashboard/node_modules/
 dashboard/dist/
+dashboard/.env
+dashboard/*.tsbuildinfo
+dashboard/vite.config.js
+dashboard/vite.config.d.ts

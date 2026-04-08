@@ -11,6 +11,7 @@ The repo now contains the gameplay plugin plus the backend and frontend pieces n
 - `backend-stub/` contains the lightweight fallback/reference backend
 - `dashboard/` contains the React stats frontend
 - `scripts/` contains the Windows startup helpers
+- `.github/workflows/` contains CI and image publishing workflows
 
 ## Requirements
 
@@ -190,11 +191,68 @@ Default local dashboard URL:
 http://127.0.0.1:4173
 ```
 
+## Docker Startup
+
+For a one-command Docker-backed startup, use:
+
+```text
+start-huntcore-docker.bat
+```
+
+That launcher will:
+
+- start or refresh `postgres`, `backend-api`, and `dashboard` with Docker Compose
+- wait for backend and dashboard readiness
+- launch Paper afterward
+
+When Paper exits, the Docker services stay running by default so the dashboard and backend can remain available.
+
+To stop the Docker services later, use:
+
+```text
+stop-huntcore-docker.bat
+```
+
+If you want a full teardown instead of a stop, run:
+
+```powershell
+.\scripts\stop-huntcore-docker-stack.ps1 -Down
+```
+
 If you prefer the script directly:
 
 ```powershell
 .\scripts\start-huntcore-stack.ps1
 ```
+
+## Docker Deployment
+
+The repo now includes a Docker deployment path for the stats stack:
+
+- `postgres`
+- `backend-api`
+- `dashboard`
+
+Paper stays outside Docker in this phase so your live gameplay setup does not have to change.
+
+Quick start:
+
+1. Copy `.env.example` to `.env`
+2. Adjust database password, allowed origin, and dashboard API URL if needed
+3. Start the stack
+
+```powershell
+docker compose up -d --build
+```
+
+Default local container URLs:
+
+- backend API: `http://127.0.0.1:8081`
+- dashboard: `http://127.0.0.1:4173`
+
+If you want Docker plus Paper together in one step, use `start-huntcore-docker.bat` instead of running Compose and Paper separately.
+
+For a deployed Paper server, point HuntCore's `backend.base-url` at the Dockerized backend URL instead of your local Windows launcher port.
 
 ## Public Stats API
 
@@ -233,6 +291,33 @@ Fallback:
 Static hosting only solves the frontend. The Java API and PostgreSQL still need their own host.
 
 See [dashboard/README.md](/c:/Users/vkper/Downloads/HuntCore/dashboard/README.md).
+
+## GitHub Actions
+
+The repo now includes GitHub Actions for:
+
+- plugin CI build
+- backend API CI build
+- dashboard CI build
+- Docker image build validation
+- GHCR image publishing on tags or manual dispatch
+
+Workflow files:
+
+- `.github/workflows/ci.yml`
+- `.github/workflows/publish-images.yml`
+
+The workflows publish:
+
+- `ghcr.io/<owner>/huntcore-backend-api`
+- `ghcr.io/<owner>/huntcore-dashboard`
+
+Deployment is still manual:
+
+```powershell
+docker compose pull
+docker compose up -d
+```
 
 ## Current Limitations
 

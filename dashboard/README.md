@@ -60,6 +60,9 @@ Override with:
 VITE_API_BASE_URL=https://your-api-host.example.com
 ```
 
+The dashboard also supports runtime config for Dockerized/self-hosted deployments.
+It will use `window.__HUNTCORE_CONFIG__.apiBaseUrl` first and fall back to `VITE_API_BASE_URL`.
+
 ## Build
 
 ```powershell
@@ -68,6 +71,36 @@ npm run build
 ```
 
 The build script also writes `dist/404.html` so GitHub Pages can serve the SPA shell on deep links.
+
+## Docker
+
+The repo root now includes a Docker Compose path that serves the built dashboard from a lightweight web server container.
+
+Default local dashboard URL:
+
+```text
+http://127.0.0.1:4173
+```
+
+If you want Docker plus Paper together in one command, use:
+
+```text
+start-huntcore-docker.bat
+```
+
+To stop the Docker services afterward, use:
+
+```text
+stop-huntcore-docker.bat
+```
+
+The container reads:
+
+```text
+HUNTCORE_DASHBOARD_API_BASE_URL
+```
+
+at startup and writes `runtime-config.js`, so you can point the same image at a different backend without rebuilding it.
 
 ## Hosting Direction
 
@@ -90,6 +123,7 @@ The frontend can be static-hosted for free, but it still depends on an always-on
 ## Static Hosting Notes
 
 - `public/_redirects` is included for Cloudflare Pages SPA routing
+- `public/runtime-config.js` provides a safe empty default for static hosts and local dev
 - `scripts/postbuild.mjs` copies `index.html` to `404.html` for GitHub Pages fallback behavior
 - set `HUNTCORE_DASHBOARD_BASE_PATH=/your-repo-name/` before `npm run build` if you deploy to a GitHub Pages project site instead of a root domain
 - set `HUNTCORE_PUBLIC_ALLOWED_ORIGIN` on `backend-api` to your deployed frontend origin when you publish publicly

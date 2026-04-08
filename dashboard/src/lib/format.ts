@@ -32,3 +32,18 @@ export function formatHeartbeatAge(ageSeconds: number): string {
   const seconds = ageSeconds % 60;
   return `${minutes}m ${seconds}s ago`;
 }
+
+export function formatCountLabel(
+  count: number,
+  singular: string,
+  plural = `${singular}s`
+): string {
+  return `${count} ${count === 1 ? singular : plural}`;
+}
+
+export function formatRoleSummary(
+  runnerMatches: number,
+  hunterMatches: number
+): string {
+  return `${formatCountLabel(runnerMatches, "runner")}, ${formatCountLabel(hunterMatches, "hunter")}`;
+}
