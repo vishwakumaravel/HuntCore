@@ -90,6 +90,29 @@ Defaults:
 
 If another local web server already uses `8080`, run this backend on `8081` and point HuntCore at `http://127.0.0.1:8081`.
 
+## Security Notes
+
+The backend has two different exposure levels:
+
+- write ingest routes used by the plugin
+- public read routes used by the dashboard
+
+Important:
+
+- `HUNTCORE_INGEST_API_KEY` protects the write routes only
+- if that value is blank, heartbeats and match ingest are unauthenticated
+- `/api/v1/public/*` is intentionally public read-only data
+- `HUNTCORE_PUBLIC_ALLOWED_ORIGIN` controls which browser origins can call the public API
+
+For local-only use, blank ingest auth is acceptable if you understand the risk.
+
+For any public deployment, you should:
+
+1. set a non-empty random `HUNTCORE_INGEST_API_KEY`
+2. put the same key into the Paper plugin's `backend.api-key`
+3. change the database password away from defaults
+4. replace wildcard or local CORS origins with your real frontend domain
+
 ## Local Run
 
 From the repo root:
@@ -149,15 +172,24 @@ That path starts the backend locally alongside Paper and optionally the dashboar
 
 ## Deployment Status
 
-What is done:
+What is already in place:
 
 - backend is containerized
 - Docker Compose works locally
 - GitHub Actions builds and validates it
 - GHCR publishing workflow exists
 
-What is not fully finished:
+Current public-hosting caveats:
 
 - always-on public hosting
-- Cloudflare Tunnel or another public backend exposure path
+- stable public backend exposure with a permanent domain
 - final public production domain setup
+
+What works today for public demos:
+
+- Cloudflare Quick Tunnel can expose the backend temporarily
+- a Cloudflare Pages frontend can read from that tunnel if CORS is updated accordingly
+
+Important caveat:
+
+- Quick Tunnel URLs are temporary and may change after restarts

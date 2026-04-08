@@ -122,16 +122,17 @@ at startup and writes `runtime-config.js`, so the same image can point at differ
 
 ## Hosting Status
 
-What is ready:
+What is already in place:
 
 - local dev
 - local Windows launcher
 - Dockerized self-hosting
+- Cloudflare Pages deployment for public demos
 
-What is not fully finished:
+Current public-hosting caveats:
 
-- final public Cloudflare Pages deployment
-- final public backend exposure and production CORS/domain setup
+- stable public backend exposure with a permanent domain or always-on host
+- final production CORS/domain setup for a non-ephemeral backend
 
 ## Static Hosting Notes
 
@@ -139,3 +140,18 @@ What is not fully finished:
 - `public/runtime-config.js` provides a safe empty default
 - `scripts/postbuild.mjs` copies `index.html` to `404.html` for GitHub Pages fallback behavior
 - `HUNTCORE_DASHBOARD_BASE_PATH` can be used for subpath deployments such as GitHub Pages project sites
+
+## Public Demo Notes
+
+The dashboard can be deployed publicly on Cloudflare Pages today.
+
+Current public demo URL:
+
+- `https://huntcore.pages.dev/`
+
+The simplest no-domain setup is:
+
+- Cloudflare Pages for the frontend
+- Cloudflare Quick Tunnel for the backend
+
+That works for demos, but the backend URL is temporary. If the Quick Tunnel URL changes, the Pages environment variable `VITE_API_BASE_URL` must be updated and the site redeployed.

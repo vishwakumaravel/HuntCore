@@ -10,6 +10,26 @@ Today, the project includes:
 - Docker support for the stats stack
 - GitHub Actions CI and image publishing
 
+## Public Demo
+
+Current public dashboard URL:
+
+- `https://huntcore.pages.dev/`
+
+Important:
+
+- this public frontend currently depends on a Cloudflare Quick Tunnel backend for demo use
+- if the Quick Tunnel is not running, the public site will not be able to load live data
+- restarting the Quick Tunnel may generate a new backend URL, which then requires updating the Pages env var and redeploying
+
+Temporary backend tunnel command:
+
+```powershell
+docker run --rm cloudflare/cloudflared:latest tunnel --url http://host.docker.internal:8081
+```
+
+That command prints the temporary public backend URL used for demo hosting.
+
 ## What Works Today
 
 These pieces are built and working:
@@ -29,8 +49,6 @@ These pieces are built and working:
   - with the local Windows launcher
   - with Docker Compose
 - GitHub Actions builds the plugin, backend, dashboard, and validates Docker images
-
-Cloudflare Pages or Cloudflare Tunnel are optional next steps, not required for the project to be complete.
 
 ## Repo Layout
 
@@ -251,6 +269,47 @@ docker compose up -d --build
 
 Paper still runs separately and should point to the backend URL exposed by Docker.
 
+## Sensitive Config And Security
+
+The main sensitive values in this project are:
+
+- root `.env`
+  - `POSTGRES_PASSWORD`
+  - `HUNTCORE_INGEST_API_KEY`
+- `huntcore-stack.local.ps1`
+  - `PostgresPassword`
+  - `IngestApiKey`
+- your Paper server config outside this repo
+  - `plugins/HuntCore/config.yml`
+  - `backend.api-key`
+
+These files are intentionally local-only and are already git-ignored:
+
+- `.env`
+- `huntcore-stack.local.ps1`
+- `logs/`
+
+What is safe to expose publicly:
+
+- dashboard URL
+- backend public read routes under `/api/v1/public/*`
+- `HUNTCORE_PUBLIC_ALLOWED_ORIGIN`
+- `HUNTCORE_DASHBOARD_API_BASE_URL`
+
+What should not be committed or shared publicly:
+
+- database passwords
+- any non-empty ingest API key
+- Cloudflare Tunnel credential files under `%USERPROFILE%\\.cloudflared\\` if you choose to use that path
+
+Before any public internet exposure, do these first:
+
+1. Set a strong `POSTGRES_PASSWORD` in `.env`.
+2. Set a strong random `HUNTCORE_INGEST_API_KEY` in `.env`.
+3. Put the same API key in the Paper plugin config's `backend.api-key`.
+4. Replace `HUNTCORE_PUBLIC_ALLOWED_ORIGIN` with the exact frontend origin you plan to use.
+5. Leave PostgreSQL unexposed to the public internet. The current Docker setup already does this by not publishing port `5432`.
+
 ## GitHub Actions
 
 The repo includes:
@@ -302,19 +361,28 @@ Use it if you want:
 
 ## Frontend Hosting
 
-The dashboard is already usable locally and through Docker.
+The dashboard is usable:
 
-Planned external hosting direction:
+- locally
+- through Docker
+- publicly at `https://huntcore.pages.dev/`
 
-- Cloudflare Pages for the static frontend
-- separately hosted `backend-api`
-- separately hosted PostgreSQL
+What works today:
 
-That is optional polish, not required for the project to function today.
+- a public Cloudflare Pages frontend is available at `https://huntcore.pages.dev/`
+- that frontend can be pointed at a Cloudflare Quick Tunnel backend for demos
+
+Important caveat:
+
+- Quick Tunnel URLs are temporary and can change whenever the tunnel is restarted
+- that means the Pages site's backend URL may need to be updated and redeployed after tunnel restarts
+- a stable public setup would need a real domain plus a named Cloudflare Tunnel or another permanent public backend host
+
+That public hosting path works today for demos, but the no-domain Quick Tunnel version is still best treated as a temporary showcase setup rather than a permanent deployment.
 
 ## Current Limitations
 
 - the current match flow supports exactly one runner
 - deaths and KD are not tracked in backend player stats
 - the dashboard depends on `backend-api`; it is not a standalone offline UI
-- public internet hosting is not fully finished yet
+- public internet hosting is possible for demos, but the current no-domain Quick Tunnel path is ephemeral rather than permanent
